@@ -1,4 +1,19 @@
-# 1. Agent 设计方案
+# 0. 项目介绍
+
+一个精简的最小 Agent 实现，用于快速开始使用 Agent 设计方案。
+
+# 1. 快速开始
+1. 安装依赖
+``` bash
+uv sync
+```
+2. 运行 Agent
+``` bash
+uv run main.py
+```
+
+
+# 2. Agent 设计方案
 Agent 结构：
 ``` text
 Agent
@@ -14,7 +29,6 @@ Agent
 ├── hook/
 ├── tools/
 ├── skills/
-├── validators/
 ├── config/
 └── tests/
 ```
