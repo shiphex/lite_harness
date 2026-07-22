@@ -34,9 +34,6 @@ SYSTEM = (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 
           "对于复杂的子问题，可以使用任务工具生成子智能体。"
 )
 
-# 记录自上次 todo_write 调用以来的轮数（仅用作演示）
-rounds_since_todo = 0
-
 
 def agent_loop(messages: list):
     """ Agent 的工作循环 object.
@@ -53,19 +50,11 @@ def agent_loop(messages: list):
         None
     """
 
-    global rounds_since_todo
-
     while True:
-
-        # (此处只为演示效果)如果模型连续 3 轮未更新待办事项，则注入此提醒
-        if rounds_since_todo >= 3 and messages:
-            messages.append({"role": "user", "content": "<reminder>请更新待办事项。</reminder>"})
-            rounds_since_todo = 0
-        
         # 调用模型接口
         response = api.call_model(messages = messages,
                                   system_prompt = SYSTEM,
-                                  tools = tools.TOOL_LIST)
+                                  tools = tools.TOOLS_LIST)
 
         # 保存模型输出
         messages.append({"role": "assistant", "content": response.content})
@@ -77,9 +66,6 @@ def agent_loop(messages: list):
             if force:
                 messages.append({"role": "user", "content": force})
             return
-        
-        # (此处只为演示效果)增加轮数计数器
-        rounds_since_todo += 1
 
         # 初始化模型输出储存列表
         results = []
@@ -103,10 +89,6 @@ def agent_loop(messages: list):
 
             # 触发 PostToolUse hook
             hook.trigger_hooks("PostToolUse", block, output)
-
-            # 调用 todo_write 时重置 nag 计数器
-            if block.name == "todo_write":
-                rounds_since_todo = 0
             
             cli.put_agent_other_info(f"{output[:200]}")
             # 保存工具调用结果
