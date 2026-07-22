@@ -84,7 +84,7 @@ def run_todo_write(todos: list) -> str:
     
     # 格式化输出
     CURRENT_TODOS = todos
-    lines = ["\n\033[33m## Current Tasks\033[0m"]
+    lines = ["\033[33m## Current Tasks\033[0m"]
     for t in CURRENT_TODOS:
         icon = {"pending": " ", "in_progress": "\033[36m▸\033[0m", "completed": "\033[32m✓\033[0m"}[t["status"]]   # 把整个大字典写在方括号前面，直接根据键取值
         lines.append(f"    [{icon}] {t['content']}")

@@ -59,7 +59,7 @@ def spawn_subagent(description: str) -> str:
     """
 
     # 使用新 messages[] 生成子代理，仅返回摘要。
-    cli.put_agent_output("\n[Subagent spawned]")
+    cli.put_agent_other_info("\033[36m+++++ [Subagent spawned] +++++\033[0m")
     messages = [{"role": "user", "content": description}]
 
     # subagent 循环
@@ -97,7 +97,7 @@ def spawn_subagent(description: str) -> str:
                 hook.trigger_hooks("PostToolUse", block, output)
 
                 # 输出 subagent 执行结果
-                cli.put_agent_output(f"    [sub] {block.name}:{str(output)[:100]}")
+                cli.put_agent_other_info(f"[sub] {block.name}:\n{str(output)[:100]}")
 
                 # 记录工具调用结果
                 results.append({"type": "tool_result", 
@@ -120,7 +120,7 @@ def spawn_subagent(description: str) -> str:
         if not result:
             result = "Subagent 在尝试 30 次后仍未给出最终答案而停止。"
 
-    cli.put_agent_output("[Subagent done]")
+    cli.put_agent_other_info("----- [Subagent done] -----")
 
     # 仅提供摘要，完整消息历史记录已丢弃
     return result
