@@ -9,6 +9,7 @@
 """
 
 import cli
+import config
 
 
 def large_output_hook(block, output: str):
@@ -24,6 +25,6 @@ def large_output_hook(block, output: str):
     Returns:
         None
     """
-    if len(output) > 4096:
+    if len(output) > config.Config().get_content_length()["MAX_INLINE_TOOL_RESULT_TOKENS"]:
         cli.inform_system_info(f"⚠ {block.name} 输出过大，长度为 {len(output)}。")
     return None
