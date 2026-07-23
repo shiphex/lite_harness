@@ -10,10 +10,9 @@ Typical usage example:
 
 from pathlib import Path
 import yaml
+import config
 
 
-WORKDIR = Path.cwd()
-SKILL_DIR = WORKDIR / ".agents" / "skills"
 # skill 注册表
 SKILL_REGISTRY: dict[str, dict] = {}
 
@@ -64,6 +63,7 @@ def _scan_skill():
         None
     """
 
+    SKILL_DIR = Path(config.Config().get_path_config("skill_dir"))
     # 检查路径是否存在
     if not SKILL_DIR.exists():
         return
@@ -96,22 +96,22 @@ def list_skill() -> str:
     return "\n".join(f"- **{s['name']}**: {s['description']}" for s in SKILL_REGISTRY.values())     # 为避免外层""与内层的被错误匹配，内部使用''
 
 
-def build_system() -> str:
-    """ 构建系统提示词
+def build_skill_prompt() -> str:
+    """ 构建关于 skill 的系统提示词
 
     该函数用于构建系统提示词，包含所有 skill 的名称和描述。
     
     Returns:
-        str: 系统提示词。
+        str: 关于 skill 的系统提示词。
     """
 
     catalog = list_skill()
 
-    return (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。"
-          f"在开始任何多步骤任务之前，请使用 todo_write 来规划您的步骤。"
-          f"当前可用的 skill 有：{catalog}"
-          f"对于复杂的子问题，可以使用任务工具生成子智能体。"
-)
+    return (f"当前可用的 skill 有：{catalog}")
+
+
+# 执行构建 skill 系统提示词
+config.set_other_prompt("SKILL_PROMPT", build_skill_prompt())
 
 
 # 加载 skill 工具执行
