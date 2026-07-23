@@ -14,7 +14,7 @@ import config
 import cli
 
 # 获取项目根目录
-WORKDIR = config.Config().get_project_path()
+WORKDIR = config.Config().get_path_config("project_path")
 
 # Gate 1: 检测命令是否在拒绝列表中
 # 拒绝列表

@@ -1,5 +1,17 @@
-from .config import Config
+from .config import (
+    Config,
+    configure,
+    get_config,
+    get_current_args,
+    parse_args,
+    update_config,
+)
 
 __all__ = [
-    "Config"
+    "Config",
+    "configure",
+    "get_config",
+    "get_current_args",
+    "parse_args",
+    "update_config",
 ]

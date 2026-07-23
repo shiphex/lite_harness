@@ -6,33 +6,18 @@ Typical usage example:
     from core.loop import agent_loop
     agent_loop(messages)
 """
-from pathlib import Path
 
 import cli
 import api
 import tools
-# import builtin
 import hook
+import config
 
 
-# 工作目录
-    # Path.cwd() 返回的是 Path 对象，不是普通字符串。os.getcwd() 返回的是普通字符串。
-    # WORKDIR：当前工作目录
-    # TOOL_RESULT_DIR：工具调用结果保存目录
-    # SKILL_DIR：技能目录
-WORKDIR = Path.cwd()
-TOOL_RESULT_DIR = WORKDIR / ".agents" / ".task_output" / "tool_results"
-TRANSCRIPT_DIR = WORKDIR / ".agents" / "transcripts"
-SKILL_DIR = WORKDIR / ".agents" / "skills"
 # skill 注册表
 SKILL_REGISTRY: dict[str, dict] = {}
 
-# 设置系统提示词、子智能体系统提示词
-SYSTEM = (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。"
-          "在开始任何多步骤任务之前，请使用 todo_write 来规划您的步骤。"
-          "随时更新状态。"
-          "对于复杂的子问题，可以使用任务工具生成子智能体。"
-)
+# 系统提示词
 
 
 def agent_loop(messages: list):
@@ -53,7 +38,7 @@ def agent_loop(messages: list):
     while True:
         # 调用模型接口
         response = api.call_model(messages = messages,
-                                  system_prompt = SYSTEM,
+                                  system_prompt = config.Config().get_system_prompt(),
                                   tools = tools.TOOLS_LIST)
 
         # 保存模型输出
