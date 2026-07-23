@@ -1,13 +1,62 @@
-from api.anthropic_api import call_anthropic_model
+from types import SimpleNamespace
+
+import api.anthropic_api as anthropic_api
 
 
-def test_call_anthropic_model(capsys):
-    response = call_anthropic_model(messages = [{"role": "user", "content": "你好"}])
-    
-    # 显式读取被拦截的输出并打印（或者对其进行断言）
-    print(response.content)
-    captured = capsys.readouterr()
-    with capsys.disabled():
-        print(f"\n捕获到的内容：{captured.out}")
+def test_call_anthropic_model(monkeypatch):
+    anthropic_calls = []
+    create_calls = []
+    fake_response = SimpleNamespace(
+        content=[
+            SimpleNamespace(type="text", text="fake response"),
+        ],
+    )
 
-    assert response is not None
+    class FakeMessages:
+        def create(self, **kwargs):
+            create_calls.append(kwargs)
+            return fake_response
+
+    class FakeAnthropic:
+        def __init__(self, **kwargs):
+            anthropic_calls.append(kwargs)
+            self.messages = FakeMessages()
+
+    monkeypatch.setattr(anthropic_api, "Anthropic", FakeAnthropic)
+
+    model_info = {
+        "api": "anthropic",
+        "model_url": "http://fake-api.example",
+        "api_key": "fake-key",
+        "model_name": "test-model",
+    }
+    content_info = {
+        "MAIN_OUTPUT_TOKENS": 123,
+    }
+    messages = [{"role": "user", "content": "hello"}]
+    tools = [{"name": "test_tool"}]
+
+    response = anthropic_api.call_anthropic_model(
+        model_info=model_info,
+        content_info=content_info,
+        messages=messages,
+        system_prompt="test system",
+        tools=tools,
+    )
+
+    assert response is fake_response
+    assert anthropic_calls == [
+        {
+            "base_url": "http://fake-api.example",
+            "api_key": "fake-key",
+        }
+    ]
+    assert create_calls == [
+        {
+            "model": "test-model",
+            "messages": messages,
+            "system": "test system",
+            "tools": tools,
+            "max_tokens": 123,
+        }
+    ]
