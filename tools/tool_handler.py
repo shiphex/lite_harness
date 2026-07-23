@@ -28,6 +28,8 @@ STANDARD_TOOLS_LIST = [
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
     {"name": "glob", "description": "查找与 glob 模式匹配的文件。",
      "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},   
+    {"name": "load_skill", "description": "按名称加载 skill 的全部内容。",
+         "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}, 
 ]
 
 
@@ -66,8 +68,6 @@ ADVANCED_TOOLS_LIST = [
     },
     {"name": "subagent", "description": "启动一个 subagent 来处理复杂的子任务，仅返回最终结果。当任务可以拆解成多个子任务时，为每一个子任务创建一个独立的 subagent。",
      "input_schema": {"type": "object", "properties": {"description": {"type": "string"}}, "required": ["description"]}},
-    {"name": "load_skill", "description": "按名称加载 skill 的全部内容。",
-     "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}, 
 ]
 
 TOOLS_LIST = STANDARD_TOOLS_LIST + ADVANCED_TOOLS_LIST

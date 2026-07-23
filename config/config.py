@@ -209,7 +209,9 @@ class Config():
         Returns:
             str: 子智能体系统提示词
         """
-        return self.prompt_config["sub_system_prompt"]
+        other_prompts = "".join(get_system_prompt_config().values())
+
+        return self.prompt_config["sub_system_prompt"] + other_prompts
 
     # —————— 获取上下文窗口大小相关配置 ——————
     def get_content_length(self):
