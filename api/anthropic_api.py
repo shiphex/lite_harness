@@ -7,13 +7,8 @@ Typical usage example:
     call_model(messages)
 ```
 """
-from config import Config
-from anthropic import Anthropic
 
-# 加载环境变量
-DEFAULT_ANTHROPIC_BASE_URL = "http://localhost:8000"
-DEFAULT_ANTHROPIC_API_KEY = "no-key"      # 使用本地部署的大模型
-MODEL_NAME = "claude-fable-5" # "Qwen3.5-4B-UD-Q6_K_XL"
+from anthropic import Anthropic
 
 
 def call_anthropic_model(model_info: dict,
