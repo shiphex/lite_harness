@@ -7,7 +7,9 @@ from config import (
     Config,
     configure,
     get_current_args,
+    get_system_prompt_config,
     parse_args,
+    set_other_prompt,
     update_config,
 )
 
@@ -67,6 +69,23 @@ def test_get_current_args_returns_copy():
     current_args["model_name"] = "mutated-outside"
 
     assert Config().get_model_config()["model_name"] == "claude-fable-5"
+
+
+def test_set_other_prompt_adds_prompt_to_system_prompt():
+    set_other_prompt("SKILL_PROMPT", "skill prompt text")
+
+    assert "skill prompt text" in Config().get_system_prompt()
+
+
+def test_set_other_prompt_overwrites_existing_prompt():
+    set_other_prompt("SKILL_PROMPT", "old prompt")
+    set_other_prompt("SKILL_PROMPT", "new prompt")
+
+    system_prompt = Config().get_system_prompt()
+
+    assert "new prompt" in system_prompt
+    assert "old prompt" not in system_prompt
+    assert get_system_prompt_config()["SKILL_PROMPT"] == "new prompt"
 
 
 def test_import_config_does_not_parse_pytest_args(monkeypatch):

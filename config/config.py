@@ -24,6 +24,10 @@ DEFAULT_SUB_SYSTEM_PROMPT = (f"你是一个编码助手，位于 {WORKDIR}，当
                              "不要再进一步委托子智能体。"
 )
 
+# 其他系统提示词
+_other_prompts: dict[str, str] = {}
+
+
 
 def parse_args(argv = None):
     """ 解析命令行参数。
@@ -79,6 +83,21 @@ def get_current_args():
 def get_config():
     """Return a Config instance built from current configuration arguments."""
     return Config(**_current_args)
+
+
+def set_other_prompt(prompt_name: str, prompt: str = ""):
+    """设置其他系统提示词相关配置。
+
+    Args:
+        prompt_name (str): 提示词名称，例如 "SKILL_PROMPT"。
+        prompt (str): 所需提示词。
+    """
+    _other_prompts[prompt_name] = prompt
+
+
+def get_system_prompt_config():
+    """获取系统提示词相关配置。"""
+    return dict(_other_prompts)
 
 
 class Config():
@@ -180,7 +199,9 @@ class Config():
         Returns:
             str: 系统提示词
         """
-        return self.prompt_config["system_prompt"]
+        other_prompts = "".join(get_system_prompt_config().values())
+
+        return self.prompt_config["system_prompt"] + other_prompts
 
     def get_sub_system_prompt(self):
         """ 获取子智能体系统提示词
@@ -188,7 +209,9 @@ class Config():
         Returns:
             str: 子智能体系统提示词
         """
-        return self.prompt_config["sub_system_prompt"]
+        other_prompts = "".join(get_system_prompt_config().values())
+
+        return self.prompt_config["sub_system_prompt"] + other_prompts
 
     # —————— 获取上下文窗口大小相关配置 ——————
     def get_content_length(self):
