@@ -439,5 +439,5 @@ def test_run_todo_write_empty_list(monkeypatch):
     assert result == "更新 0 个任务。"
     assert todo_write.CURRENT_TODOS == []
     assert output_messages == [
-        "\n\033[33m## Current Tasks\033[0m"
+        "\033[33m## Current Tasks\033[0m"
     ]

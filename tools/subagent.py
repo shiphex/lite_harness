@@ -14,7 +14,7 @@ import hook
 from . import tool_handler
 
 
-WORKDIR = config.Config().get_project_path()
+WORKDIR = config.Config().get_path_config("project_path")
 
 # 设置子智能体系统提示词
 SUB_SYSTEM = (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。"
