@@ -19,6 +19,6 @@ def context_inject_hook(query: str):
         query (str): 用户输入的查询字符串。
     
     """
-    WORKDIR = config.Config().get_project_path()
+    WORKDIR = config.Config().get_path_config("project_path")
     cli.put_agent_other_info(f"[HOOK] UserPromptSubmit: working in {WORKDIR}")
     return None

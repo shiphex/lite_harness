@@ -1,7 +1,79 @@
+import importlib
+import sys
 from pathlib import Path
-import config
 
 
-def test_get_project_path():
-    """ 测试获取项目根目录 """
-    assert config.Config().get_project_path() == Path.cwd()
+from config import (
+    Config,
+    configure,
+    get_current_args,
+    parse_args,
+    update_config,
+)
+
+
+def test_parse_args_defaults():
+    """未传入参数时，应返回默认配置。"""
+
+    result = parse_args([])
+
+    assert result == {
+        "chars_per_token": 1.0,
+        "ctx_tokens": 20480,
+        "max_tokens": 2048,
+        "api": "anthropic",
+        "model_url": "http://localhost:8000",
+        "api_key": "no-key",
+        "model_name": "claude-fable-5",
+    }
+
+
+def test_config_model_config_uses_api_key():
+    result = Config(**parse_args([])).get_model_config()
+
+    assert result["api_key"] == "no-key"
+
+
+def test_configure_defaults_are_used_by_config():
+    configure([])
+
+    result = Config().get_model_config()
+
+    assert result["api_key"] == "no-key"
+    assert result["model_name"] == "claude-fable-5"
+
+
+def test_configure_command_line_args_are_used_by_config():
+    configure(["--model_name", "custom-model", "--api_key", "custom-key"])
+
+    result = Config().get_model_config()
+
+    assert result["api_key"] == "custom-key"
+    assert result["model_name"] == "custom-model"
+
+
+def test_update_config_changes_future_config_instances():
+    configure([])
+
+    update_config(model_name="runtime-model")
+
+    assert Config().get_model_config()["model_name"] == "runtime-model"
+
+
+def test_get_current_args_returns_copy():
+    configure([])
+    current_args = get_current_args()
+
+    current_args["model_name"] = "mutated-outside"
+
+    assert Config().get_model_config()["model_name"] == "claude-fable-5"
+
+
+def test_import_config_does_not_parse_pytest_args(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["pytest", "--collect-only"])
+    monkeypatch.delitem(sys.modules, "config.config", raising=False)
+    monkeypatch.delitem(sys.modules, "config", raising=False)
+
+    imported_config = importlib.import_module("config")
+
+    assert imported_config.Config().get_path_config("project_path") == Path.cwd()

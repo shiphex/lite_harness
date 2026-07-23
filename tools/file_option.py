@@ -13,7 +13,7 @@ from pathlib import Path
 import config
 
 # 获取项目根目录
-WORKDIR = config.Config().get_project_path()
+WORKDIR = config.Config().get_path_config("project_path")
 
 
 def safe_path(p: str) -> Path:
