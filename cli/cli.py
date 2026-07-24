@@ -15,6 +15,14 @@ Typical usage example:
 - 智能体输出：原色    \033[0m\033[0m
 - 错误信息：红色    \033[31m\033[0m
 """
+
+import sys
+
+# 确保输出流支持 UTF-8 编码
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
 # res means reset
 color = {
     "res"           : "\033[0m",        # 重置颜色

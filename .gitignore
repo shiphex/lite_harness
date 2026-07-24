@@ -13,3 +13,4 @@ workspace/
 
 # Documentation
 doc/llm_config.md
+.agents/transcripts/

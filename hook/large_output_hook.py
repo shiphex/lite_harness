@@ -26,5 +26,5 @@ def large_output_hook(block, output: str):
         None
     """
     if len(output) > config.Config().get_content_length()["MAX_INLINE_TOOL_RESULT_TOKENS"]:
-        cli.inform_system_info(f"⚠ {block.name} 输出过大，长度为 {len(output)}。")
+        cli.inform_system_info(f"[WARN] {block.name} 输出过大，长度为 {len(output)}。")
     return None
