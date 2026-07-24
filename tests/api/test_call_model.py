@@ -18,6 +18,7 @@ def test_call_model(monkeypatch):
     }
     content_info = {
         "MAIN_OUTPUT_TOKENS": 5120,
+        "SUMMARY_OUTPUT_TOKENS": 2048,
     }
 
     def fake_call_anthropic_model(
@@ -26,6 +27,7 @@ def test_call_model(monkeypatch):
         messages,
         system_prompt,
         tools,
+        model_pattern,
     ):
         calls.append(
             {
@@ -34,6 +36,7 @@ def test_call_model(monkeypatch):
                 "messages": messages,
                 "system_prompt": system_prompt,
                 "tools": tools,
+                "model_pattern": model_pattern,
             }
         )
         return fake_response
@@ -65,8 +68,50 @@ def test_call_model(monkeypatch):
             "messages": messages,
             "system_prompt": "test system",
             "tools": tools,
+            "model_pattern": "default",
         }
     ]
+
+
+def test_call_model_passes_summary_model_pattern(monkeypatch):
+    call_model_module = importlib.import_module("api.call_model")
+    calls = []
+    fake_response = SimpleNamespace(content=[])
+    model_config = {
+        "api": "anthropic",
+        "model_url": "http://fake-api.example",
+        "api_key": "fake-key",
+        "model_name": "test-model",
+    }
+    content_info = {
+        "MAIN_OUTPUT_TOKENS": 5120,
+        "SUMMARY_OUTPUT_TOKENS": 2048,
+    }
+
+    def fake_call_anthropic_model(**kwargs):
+        calls.append(kwargs)
+        return fake_response
+
+    monkeypatch.setattr(
+        call_model_module,
+        "get_model_config",
+        lambda: (model_config, content_info),
+    )
+    monkeypatch.setattr(
+        call_model_module,
+        "call_anthropic_model",
+        fake_call_anthropic_model,
+    )
+
+    response = call_model_module.call_model(
+        messages=[],
+        system_prompt="summary system",
+        tools=[],
+        model_pattern="summary",
+    )
+
+    assert response is fake_response
+    assert calls[0]["model_pattern"] == "summary"
 
 
 def test_get_model_config_uses_current_config():

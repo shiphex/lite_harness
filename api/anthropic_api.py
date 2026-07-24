@@ -11,11 +11,17 @@ Typical usage example:
 from anthropic import Anthropic
 
 
+# 模型模式选择
+model_pattern = ["default",
+                 "summary"]
+
 def call_anthropic_model(model_info: dict,
                          content_info: dict,
                          messages: list = [], 
                          system_prompt: str = "你是一个专业的问答助手。", 
-                         tools: list = []):
+                         tools: list = [],
+                         model_pattern: str = "default"
+                         ):
     """ 调用 Anthropic 模型接口 object.
     
     调用 Anthropic 模型接口，返回模型输出。
@@ -26,6 +32,7 @@ def call_anthropic_model(model_info: dict,
         messages: 包含用户输入和模型输出的消息列表。
         system_prompt: 系统提示。
         tools: 工具列表。
+        model_pattern: 模型模式。
     
     Returns:
         response: 模型输出。
@@ -33,12 +40,14 @@ def call_anthropic_model(model_info: dict,
     """
     client = Anthropic(base_url = model_info["model_url"], api_key = model_info["api_key"])   
 
+    max_tokens = content_info["SUMMARY_OUTPUT_TOKENS"] if model_pattern == "summary" else content_info["MAIN_OUTPUT_TOKENS"]
+
     response = client.messages.create(
         model = model_info["model_name"],
         messages = messages,
         system = system_prompt,
         tools = tools,
-        max_tokens = content_info["MAIN_OUTPUT_TOKENS"],
+        max_tokens = max_tokens,
     )
 
     return response

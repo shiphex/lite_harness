@@ -14,10 +14,8 @@ import hook
 import config
 
 
-# skill 注册表
-SKILL_REGISTRY: dict[str, dict] = {}
-
-# 系统提示词
+# 反应式紧凑的重试次数限制
+MAX_REACTIVE_RETRIES = 1  
 
 
 def agent_loop(messages: list):
@@ -35,11 +33,30 @@ def agent_loop(messages: list):
         None
     """
 
+    reactive_retries = 0
+
     while True:
-        # 调用模型接口
-        response = api.call_model(messages = messages,
-                                  system_prompt = config.Config().get_system_prompt(),
-                                  tools = tools.TOOLS_LIST)
+
+        # 执行压缩管线
+        messages[:] = tools.tool_result_budget(messages)      # L3 储存大的工具调用输出结果
+        messages[:] = tools.snip_compact(messages)            # L1 裁剪式压缩
+        messages[:] = tools.micro_compact(messages)           # L2旧工具输出结果占位符替换
+
+        try:
+            # 调用 model 回答问题，并获得 model 回答的文本内容
+            response = api.call_model(messages = messages,
+                                      system_prompt = config.Config().get_system_prompt(),
+                                      tools = tools.TOOLS_LIST)
+        except Exception as e:
+            if ("prompt is too long" in str(e).lower() \
+                or "too many tokens" in str(e).lower() \
+                or "exceeds the available context size" in str(e).lower()) \
+                and reactive_retries < MAX_REACTIVE_RETRIES:
+                cli.inform_system_warning("\n[WARN] [重新执行压缩]")
+                messages[:] = tools.compact_history(messages)
+                reactive_retries += 1
+                continue
+            raise   # 抛出异常，结束循环
 
         # 保存模型输出
         messages.append({"role": "assistant", "content": response.content})
@@ -69,6 +86,16 @@ def agent_loop(messages: list):
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(blocked)})
                 continue
 
+            # 对调用了压缩工具进行处理
+            if block.name == "compact":
+                messages[:] = tools.compact_history(messages)
+                messages.append({
+                    "role": "user",
+                    "content": "[压缩工具已执行完成] 请基于上面的摘要继续当前任务；不要因为本条消息再次调用 compact。",
+                })
+                break   # 使用压缩工具后直接 break，不使用 for……else 语句中 else 后的 messages.append(results)
+
+
             # 执行工具调用
             output = tools.call_tool(block.name, block.input)
 
@@ -82,7 +109,10 @@ def agent_loop(messages: list):
                 "tool_use_id": block.id,
                 "content": output,
             })
+        else:
+            # 将调用工具的结果作为新消息追加，以供 model 调用（当没有使用压缩工具时）
+            messages.append({"role": "user", "content": results})
+            continue
 
-        # 将调用工具的结果作为新消息追加，以供 model 调用（当没有使用压缩工具时）
-        messages.append({"role": "user", "content": results})
-        continue
+        # 让使用压缩工具后的 break 到达这里得到处理
+        continue 
