@@ -68,6 +68,8 @@ ADVANCED_TOOLS_LIST = [
     },
     {"name": "subagent", "description": "启动一个 subagent 来处理复杂的子任务，仅返回最终结果。当任务可以拆解成多个子任务时，为每一个子任务创建一个独立的 subagent。",
      "input_schema": {"type": "object", "properties": {"description": {"type": "string"}}, "required": ["description"]}},
+    {"name": "compact", "description": "总结早期聊天记录以此释放上下文空间。",
+     "input_schema": {"type": "object", "properties": {"focus": {"type": "string"}}}},
 ]
 
 TOOLS_LIST = STANDARD_TOOLS_LIST + ADVANCED_TOOLS_LIST
