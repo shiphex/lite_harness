@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import api.gemini_api as gemini_api
+from google.genai import types
 
 
 def test_call_gemini_model_passes_request(monkeypatch):
@@ -90,3 +91,66 @@ def test_call_gemini_model_adapts_function_calls(monkeypatch):
     assert response.content[0].name == "test_tool"
     assert response.content[0].input == {"value": 3}
 
+
+def test_call_gemini_model_preserves_thought_signature(monkeypatch):
+    generate_calls = []
+    function_call_part = types.Part.from_function_call(
+        name="test_tool",
+        args={"value": 3},
+    )
+    function_call_part.thought_signature = b"signature"
+    fake_response = SimpleNamespace(
+        text="",
+        function_calls=[],
+        candidates=[
+            SimpleNamespace(
+                content=SimpleNamespace(parts=[function_call_part])
+            )
+        ],
+    )
+
+    class FakeModels:
+        def generate_content(self, **kwargs):
+            generate_calls.append(kwargs)
+            return fake_response
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(gemini_api.genai, "Client", FakeClient)
+
+    response = gemini_api.call_gemini_model(
+        model_info={
+            "model_url": "http://localhost:8000",
+            "api_key": "fake-key",
+            "model_name": "test-model",
+        },
+        content_info={
+            "MAIN_OUTPUT_TOKENS": 123,
+            "SUMMARY_OUTPUT_TOKENS": 45,
+        },
+        messages=[],
+    )
+
+    assert response.stop_reason == "tool_use"
+    assert response.content[0].thought_signature == b"signature"
+
+    converted = gemini_api._convert_messages(
+        [
+            {"role": "assistant", "content": response.content},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": response.content[0].id,
+                        "content": "ok",
+                    }
+                ],
+            },
+        ]
+    )
+
+    assert converted[0].parts[0].thought_signature == b"signature"
+    assert converted[1].parts[0].function_response.name == "test_tool"

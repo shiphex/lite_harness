@@ -77,12 +77,14 @@ def _convert_messages(messages: list):
                     name = get_value(block, "name")
                     if tool_id:
                         tool_call_names[tool_id] = name
-                    parts.append(
-                        types.Part.from_function_call(
-                            name=name,
-                            args=get_value(block, "input", {}) or {},
-                        )
+                    part = types.Part.from_function_call(
+                        name=name,
+                        args=get_value(block, "input", {}) or {},
                     )
+                    thought_signature = get_value(block, "thought_signature", None)
+                    if thought_signature:
+                        part.thought_signature = thought_signature
+                    parts.append(part)
                 elif block_type == "tool_result":
                     # Gemini 的 function_response 使用函数名，不使用 Anthropic 的 tool_use_id。
                     tool_id = get_value(block, "tool_use_id")
@@ -125,24 +127,44 @@ def _make_config(content_info: dict, system_prompt: str, tools: list, model_patt
     return types.GenerateContentConfig(**config_kwargs)
 
 
-def _extract_function_calls(response):
-    """兼容提取 Gemini 不同形态的 function call。"""
-    function_calls = getattr(response, "function_calls", None)
-    if function_calls:
-        return function_calls
-
-    camel_calls = getattr(response, "functionCalls", None)
-    if camel_calls:
-        return camel_calls
-
-    calls = []
+def _extract_function_call_parts(response):
+    """兼容提取 Gemini 不同形态的 function call 和 thought_signature。"""
+    call_parts = []
     for candidate in getattr(response, "candidates", []) or []:
         content = getattr(candidate, "content", None)
         for part in getattr(content, "parts", []) or []:
             function_call = getattr(part, "function_call", None)
             if function_call:
-                calls.append(function_call)
-    return calls
+                call_parts.append(
+                    {
+                        "function_call": function_call,
+                        "thought_signature": getattr(part, "thought_signature", None),
+                    }
+                )
+    if call_parts:
+        return call_parts
+
+    function_calls = getattr(response, "function_calls", None)
+    if function_calls:
+        return [
+            {
+                "function_call": function_call,
+                "thought_signature": getattr(function_call, "thought_signature", None),
+            }
+            for function_call in function_calls
+        ]
+
+    camel_calls = getattr(response, "functionCalls", None)
+    if camel_calls:
+        return [
+            {
+                "function_call": function_call,
+                "thought_signature": getattr(function_call, "thoughtSignature", None),
+            }
+            for function_call in camel_calls
+        ]
+
+    return []
 
 
 def _adapt_response(response):
@@ -152,18 +174,21 @@ def _adapt_response(response):
     if text:
         content.append(make_text_block(text))
 
-    function_calls = _extract_function_calls(response)
-    for index, function_call in enumerate(function_calls):
+    function_call_parts = _extract_function_call_parts(response)
+    for index, call_part in enumerate(function_call_parts):
+        function_call = call_part["function_call"]
         tool_id = get_value(function_call, "id", None) or f"gemini-tool-{index}"
-        content.append(
-            make_tool_use_block(
-                tool_id=tool_id,
-                name=get_value(function_call, "name"),
-                tool_input=get_value(function_call, "args", {}) or {},
-            )
+        tool_use = make_tool_use_block(
+            tool_id=tool_id,
+            name=get_value(function_call, "name"),
+            tool_input=get_value(function_call, "args", {}) or {},
         )
+        thought_signature = call_part.get("thought_signature")
+        if thought_signature:
+            tool_use.thought_signature = thought_signature
+        content.append(tool_use)
 
-    stop_reason = "tool_use" if function_calls else "end_turn"
+    stop_reason = "tool_use" if function_call_parts else "end_turn"
     return make_model_response(content, stop_reason)
 
 
