@@ -37,6 +37,9 @@ def get_max_tokens(content_info: dict, model_pattern: str):
     """根据模型模式选择输出 token 数。"""
     if model_pattern == "summary":
         return content_info["SUMMARY_OUTPUT_TOKENS"]
+    elif model_pattern == "mini":
+        return content_info["MINI_OUTPUT_TOKENS"]
+    
     return content_info["MAIN_OUTPUT_TOKENS"]
 
 

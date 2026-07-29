@@ -18,7 +18,8 @@ from .openai_api import call_openai_model
 
 # 模型模式选择
 model_pattern = ["default",
-                 "summary"]
+                 "summary",
+                 "mini"]
 
 
 def get_model_config():
