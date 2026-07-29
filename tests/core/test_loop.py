@@ -27,6 +27,10 @@ def test_agent_loop_compact_replaces_history_without_orphan_tool_result(monkeypa
     monkeypatch.setattr(loop.tools, "tool_result_budget", lambda value: value)
     monkeypatch.setattr(loop.tools, "snip_compact", lambda value: value)
     monkeypatch.setattr(loop.tools, "micro_compact", lambda value: value)
+    monkeypatch.setattr(loop.builtin, "load_memories", lambda messages: "")
+    monkeypatch.setattr(loop.builtin, "build_system", lambda: "system prompt")
+    monkeypatch.setattr(loop.builtin, "extract_memories", lambda messages: None)
+    monkeypatch.setattr(loop.builtin, "consolidate_memories", lambda: None)
     monkeypatch.setattr(
         loop.tools,
         "compact_history",
