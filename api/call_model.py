@@ -11,6 +11,9 @@ Typical usage example:
 
 import config
 from .anthropic_api import call_anthropic_model
+from .gemini_api import call_gemini_model
+from .langchain_api import call_langchain_model
+from .openai_api import call_openai_model
 
 
 # 模型模式选择
@@ -57,9 +60,31 @@ def call_model(messages: list = [],
 
     # 调用不同厂家的模型接口
     if api == "openai":
-        pass
+        # 调用 OpenAI 兼容接口。
+        response = call_openai_model(model_info = model_config,
+                                     content_info = default_content_length,
+                                     messages = messages,
+                                     system_prompt = system_prompt,
+                                     tools = tools,
+                                     model_pattern = model_pattern)
     elif api == "anthropic":
         response = call_anthropic_model(model_info = model_config,
+                                        content_info = default_content_length,
+                                        messages = messages,
+                                        system_prompt = system_prompt,
+                                        tools = tools,
+                                        model_pattern = model_pattern)
+    elif api == "gemini":
+        # 调用 Gemini 接口。
+        response = call_gemini_model(model_info = model_config,
+                                     content_info = default_content_length,
+                                     messages = messages,
+                                     system_prompt = system_prompt,
+                                     tools = tools,
+                                     model_pattern = model_pattern)
+    elif api == "langchain":
+        # 通过 LangChain 调用 OpenAI 后端接口。
+        response = call_langchain_model(model_info = model_config,
                                         content_info = default_content_length,
                                         messages = messages,
                                         system_prompt = system_prompt,

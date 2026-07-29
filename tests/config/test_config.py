@@ -2,6 +2,8 @@ import importlib
 import sys
 from pathlib import Path
 
+import pytest
+
 
 from config import (
     Config,
@@ -28,6 +30,18 @@ def test_parse_args_defaults():
         "api_key": "no-key",
         "model_name": "claude-fable-5",
     }
+
+
+def test_parse_args_accepts_supported_apis():
+    for api in ("anthropic", "openai", "gemini", "langchain"):
+        result = parse_args(["--api", api])
+
+        assert result["api"] == api
+
+
+def test_parse_args_rejects_unsupported_api():
+    with pytest.raises(SystemExit):
+        parse_args(["--api", "unsupported"])
 
 
 def test_config_model_config_uses_api_key():

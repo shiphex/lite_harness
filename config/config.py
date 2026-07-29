@@ -27,6 +27,9 @@ DEFAULT_SUB_SYSTEM_PROMPT = (f"你是一个编码助手，位于 {WORKDIR}，当
 # 其他系统提示词
 _other_prompts: dict[str, str] = {}
 
+# 已经实现的模型 API 接口
+SUPPORTED_APIS = ("anthropic", "openai", "gemini", "langchain")
+
 
 
 def parse_args(argv = None):
@@ -41,7 +44,7 @@ def parse_args(argv = None):
     parser.add_argument("--chars_per_token", type = float, default = 1, help = "每个 token 大约多少个字符")
     parser.add_argument("--ctx_tokens", type = int, default = 20480, help = "总上下文窗口大小")
     parser.add_argument("--max_tokens", type = int, default = 2048, help = "最大输出 token 数量")
-    parser.add_argument("--api", type = str, default = "anthropic", help = "API 名称")
+    parser.add_argument("--api", type = str, default = "anthropic", choices = SUPPORTED_APIS, help = "API 名称")
     parser.add_argument("--model_url", type = str, default = "http://localhost:8000", help = "模型 URL")
     parser.add_argument("--api_key", type = str, default = "no-key", help = "模型 API 密钥")
     parser.add_argument("--model_name", type = str, default = "claude-fable-5", help = "模型名称")
