@@ -233,6 +233,7 @@ class Config():
                     "CTX_TOKENS",
                     "MAIN_OUTPUT_TOKENS",
                     "SUMMARY_OUTPUT_TOKENS",
+                    "MINI_OUTPUT_TOKENS",
                     "SAFETY_TOKENS",
                     "MAX_INLINE_TOOL_RESULT_TOKENS",
                     "MAIN_INPUT_BUDGET",
