@@ -18,13 +18,14 @@ import builtin
 MAX_REACTIVE_RETRIES = 1  
 
 
-def agent_loop(messages: list):
+def agent_loop(messages: list, context: dict):
     """ Agent 的工作循环 object.
 
     该循环负责调用模型接口，执行工具调用，保存模型输出。
     
     Args:
         messages: 包含用户输入和模型输出的消息列表。
+        context: 包含当前会话上下文的字典。
     
     Returns:
         None
@@ -38,7 +39,9 @@ def agent_loop(messages: list):
     # 加载需要注入本轮会话的记忆内容
     memories_content = builtin.load_memories(messages)
     memories_turn = len(messages) - 1 if messages and isinstance(messages[-1].get("content"), str) else None
-    system = builtin.build_system()
+
+    # 初始化系统提示词
+    system = builtin.get_system_prompt(context)
 
     while True:
 
@@ -165,6 +168,10 @@ def agent_loop(messages: list):
         else:
             # 将调用工具的结果作为新消息追加，以供 model 调用（当没有使用压缩工具时）
             messages.append({"role": "user", "content": results})
+
+            # 更新上下文
+            context = builtin.update_context(context, messages)
+            system = builtin.get_system_prompt(context)
             continue
 
         # 让使用压缩工具后的 break 到达这里得到处理

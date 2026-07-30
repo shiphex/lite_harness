@@ -10,6 +10,7 @@ Typical usage example:
 
 import cli
 import hook
+import builtin
 from .loop import agent_loop
 
 
@@ -32,7 +33,10 @@ def agent():
     # 告知用户系统信息
     cli.inform_system_info("输入问题，回车发送。输入 q 退出。")
     
+    # 初始化历史记录
     history = []
+    # 初始化上下文
+    context = builtin.update_context({}, [])
     while True:
         # 获取用户输入
         try:
@@ -50,7 +54,10 @@ def agent():
         history.append({"role": "user", "content": user_input})
 
         # 执行 agent_loop 工作循环
-        agent_loop(history)
+        agent_loop(history, context)
+
+        # 更新上下文
+        context = builtin.update_context(context, history)
 
         # 执行系统输出
         response = history[-1]["content"]

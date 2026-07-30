@@ -110,11 +110,6 @@ def build_skill_prompt() -> str:
     return (f"当前可用的 skill 有：{catalog}")
 
 
-# 执行构建 skill 系统提示词
-config.set_other_prompt("SKILL_PROMPT", build_skill_prompt())
-
-
-# 加载 skill 工具执行
 def load_skill(name: str) -> str:
     """ 加载 skill 工具执行
 
