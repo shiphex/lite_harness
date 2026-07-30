@@ -216,6 +216,21 @@ def test_extract_memories_writes_items_from_model_response(monkeypatch, tmp_path
     )
 
 
+def test_extract_memories_warns_when_model_call_fails(monkeypatch, tmp_path, capsys):
+    memory_dir, _ = _use_tmp_memory_dir(monkeypatch, tmp_path)
+
+    def failing_call_model(*args, **kwargs):
+        raise RuntimeError("mini model unavailable")
+
+    monkeypatch.setattr(memory.api, "call_model", failing_call_model)
+
+    memory.extract_memories([{"role": "user", "content": "Remember that I use tabs."}])
+
+    captured = capsys.readouterr()
+    assert "[Memory: 提取失败] mini model unavailable" in captured.out
+    assert list(memory_dir.glob("*.md")) == []
+
+
 def test_consolidate_memories_rewrites_memory_files(monkeypatch, tmp_path):
     memory_dir, memory_index = _use_tmp_memory_dir(monkeypatch, tmp_path)
     for idx in range(memory.CONSOLIDATE_THRESHOLD):
