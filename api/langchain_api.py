@@ -21,7 +21,10 @@ from .response_adapter import (
 )
 
 
-model_pattern = ["default", "summary", "mini"]
+model_pattern = ["default",
+                 "summary",
+                 "mini",
+                 "long"]
 
 
 def _content_to_text(content):

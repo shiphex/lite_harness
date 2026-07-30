@@ -19,7 +19,8 @@ from .openai_api import call_openai_model
 # 模型模式选择
 model_pattern = ["default",
                  "summary",
-                 "mini"]
+                 "mini",
+                 "long"]
 
 
 def get_model_config():
@@ -38,7 +39,8 @@ def get_model_config():
 def call_model(messages: list = [], 
                system_prompt: str = "", 
                tools: list = [], 
-               model_pattern: str = "default"):
+               model_pattern: str = "default",
+               model_config: dict = {}):
     """ 调用模型接口 object.
 
     该函数负责调用不同厂家的模型接口。
@@ -57,6 +59,7 @@ def call_model(messages: list = [],
 
     # 配置默认模型上下文窗口大小
     model_config, default_content_length = get_model_config()
+    model_config.update(model_config)
     api = model_config["api"]
 
     # 调用不同厂家的模型接口

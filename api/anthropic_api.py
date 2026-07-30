@@ -14,7 +14,8 @@ from anthropic import Anthropic
 # 模型模式选择
 model_pattern = ["default",
                  "summary",
-                 "mini"]
+                 "mini",
+                 "long"]
 
 def call_anthropic_model(model_info: dict,
                          content_info: dict,
