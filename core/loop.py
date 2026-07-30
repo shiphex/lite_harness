@@ -34,14 +34,18 @@ def agent_loop(messages: list, context: dict):
         None
     """
 
-    reactive_retries = 0
-
     # 加载需要注入本轮会话的记忆内容
     memories_content = builtin.load_memories(messages)
     memories_turn = len(messages) - 1 if messages and isinstance(messages[-1].get("content"), str) else None
 
     # 初始化系统提示词
     system = builtin.get_system_prompt(context)
+
+    # LLM 状态加载
+    state = builtin.RecoveryState()
+
+    # 模型模式
+    model_pattern = "default"
 
     while True:
 
@@ -93,20 +97,37 @@ def agent_loop(messages: list, context: dict):
                 }
 
             # 调用 model 回答问题，并获得 model 回答的文本内容
-            response = api.call_model(messages = request_messages,
-                                      system_prompt = system,
-                                      tools = tools.TOOLS_LIST)
-            reactive_retries = 0
+            response = builtin.with_retry( 
+                lambda mp = model_pattern, mdl = {"model_name": state.current_model}:
+                api.call_model(messages = request_messages,
+                               system_prompt = system,
+                               tools = tools.TOOLS_LIST, 
+                               model_pattern = mp, 
+                               model_config = mdl), 
+                state)
+            
         except Exception as e:
-            if ("prompt is too long" in str(e).lower() \
-                or "too many tokens" in str(e).lower() \
-                or "exceeds the available context size" in str(e).lower()) \
-                and reactive_retries < MAX_REACTIVE_RETRIES:
-                cli.inform_system_warning("\n[WARN] [重新执行压缩]")
-                messages[:] = tools.compact_history(messages)
-                reactive_retries += 1
+            if builtin.is_prompt_too_long_error(e):
+                if not state.has_attempted_reactive_compact:
+                    print("\033[33m\n⚠ [重新执行压缩]\033[0m")
+                    messages[:] = tools.reactive_compact(messages)
+                    state.has_attempted_reactive_compact = True
+                    continue
+                print("  \033[31m[unrecoverable] 压缩后依然过长。\033[0m")
+                messages.append({"role": "assistant", "content": [
+                    {"type": "text",
+                     "text": "[Error] 上下文过大，无法继续。"}]})
+                return
+
+        # 若 model 回答的文本内容超过上下文大小，执行 max_tokens_too_long_error 函数
+        if response.stop_reason == "max_tokens":
+            state, messages = builtin.max_tokens_too_long_error(messages, state)
+            if state.recovery_count >= builtin.MAX_RECOVERY_RETRIES:
+                return
+            if state.has_escalated and state.recovery_count < builtin.MAX_RECOVERY_RETRIES:
+                model_pattern = "long"
                 continue
-            raise   # 抛出异常，结束循环
+            continue
 
         # 保存模型输出
         messages.append({"role": "assistant", "content": response.content})
