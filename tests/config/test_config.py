@@ -2,6 +2,8 @@ import importlib
 import sys
 from pathlib import Path
 
+import pytest
+
 
 from config import (
     Config,
@@ -30,10 +32,28 @@ def test_parse_args_defaults():
     }
 
 
+def test_parse_args_accepts_supported_apis():
+    for api in ("anthropic", "openai", "gemini", "langchain"):
+        result = parse_args(["--api", api])
+
+        assert result["api"] == api
+
+
+def test_parse_args_rejects_unsupported_api():
+    with pytest.raises(SystemExit):
+        parse_args(["--api", "unsupported"])
+
+
 def test_config_model_config_uses_api_key():
     result = Config(**parse_args([])).get_model_config()
 
     assert result["api_key"] == "no-key"
+
+
+def test_config_content_length_includes_mini_output_tokens():
+    result = Config(**parse_args([])).get_content_length()
+
+    assert result["MINI_OUTPUT_TOKENS"] == 204
 
 
 def test_configure_defaults_are_used_by_config():

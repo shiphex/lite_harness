@@ -11,11 +11,16 @@ Typical usage example:
 
 import config
 from .anthropic_api import call_anthropic_model
+from .gemini_api import call_gemini_model
+from .langchain_api import call_langchain_model
+from .openai_api import call_openai_model
 
 
 # 模型模式选择
 model_pattern = ["default",
-                 "summary"]
+                 "summary",
+                 "mini",
+                 "long"]
 
 
 def get_model_config():
@@ -34,7 +39,8 @@ def get_model_config():
 def call_model(messages: list = [], 
                system_prompt: str = "", 
                tools: list = [], 
-               model_pattern: str = "default"):
+               model_pattern: str = "default",
+               model_config: dict = {}):
     """ 调用模型接口 object.
 
     该函数负责调用不同厂家的模型接口。
@@ -53,13 +59,36 @@ def call_model(messages: list = [],
 
     # 配置默认模型上下文窗口大小
     model_config, default_content_length = get_model_config()
+    model_config.update(model_config)
     api = model_config["api"]
 
     # 调用不同厂家的模型接口
     if api == "openai":
-        pass
+        # 调用 OpenAI 兼容接口。
+        response = call_openai_model(model_info = model_config,
+                                     content_info = default_content_length,
+                                     messages = messages,
+                                     system_prompt = system_prompt,
+                                     tools = tools,
+                                     model_pattern = model_pattern)
     elif api == "anthropic":
         response = call_anthropic_model(model_info = model_config,
+                                        content_info = default_content_length,
+                                        messages = messages,
+                                        system_prompt = system_prompt,
+                                        tools = tools,
+                                        model_pattern = model_pattern)
+    elif api == "gemini":
+        # 调用 Gemini 接口。
+        response = call_gemini_model(model_info = model_config,
+                                     content_info = default_content_length,
+                                     messages = messages,
+                                     system_prompt = system_prompt,
+                                     tools = tools,
+                                     model_pattern = model_pattern)
+    elif api == "langchain":
+        # 通过 LangChain 调用 OpenAI 后端接口。
+        response = call_langchain_model(model_info = model_config,
                                         content_info = default_content_length,
                                         messages = messages,
                                         system_prompt = system_prompt,

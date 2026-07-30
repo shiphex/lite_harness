@@ -1,0 +1,190 @@
+"""系统提示词加载与拼装工具。
+
+本模块负责读取已注册的 skill 目录信息和记忆索引，并将它们拼接到
+系统提示词中。调用方需要在模块作用域提供以下对象：
+    SKILL_REGISTRY: skill 注册表，值包含 name 和 description 字段。
+    MEMORY_INDEX: 记忆索引文件路径，通常为 pathlib.Path。
+    WORKDIR: 当前项目工作目录。
+
+Typical usage example:
+    build_system()
+"""
+
+import json
+import config
+import cli
+
+try:
+    from tools.load_skill import SKILL_REGISTRY
+except Exception:
+    SKILL_REGISTRY = {}
+
+try:
+    from tools.tool_handler import TOOLS_LIST, TOOLS_HANDLERS
+except Exception:
+    TOOLS_LIST = []
+    TOOLS_HANDLERS = {}
+
+
+
+WORKDIR = config.Config().get_project_path()
+"""当前项目工作目录。"""
+
+MEMORY_INDEX = config.Config().get_path_config("memory_index")
+"""记忆索引文件路径。"""
+
+# ═══════════════════════════════════════════════════════════
+# 加载系统提示词
+# ═══════════════════════════════════════════════════════════
+
+# 获取 skill 列表
+def list_skill() -> str:
+    """List all skills (name + one-line description).
+
+    从 SKILL_REGISTRY 中读取 skill 名称和单行描述，并格式化为可直接
+    写入系统提示词的 Markdown 列表。
+
+    Returns:
+        str: skill 列表文本；没有发现 skill 时返回默认提示。
+    """
+    if not SKILL_REGISTRY:
+        return "(没有发现 skill。)"
+    # 为避免外层""与内层的被错误匹配，内部使用''
+    return "\n".join(f"- **{s['name']}**: {s['description']}" 
+                     for s in SKILL_REGISTRY.values())
+
+
+# 读取记忆索引
+def read_memory_index():
+    """读取记忆索引文件内容。
+
+    Returns:
+        str: 去除首尾空白后的记忆索引文本；文件不存在或内容为空时返回空字符串。
+    """
+    if not MEMORY_INDEX.exists():
+        return ""
+    text = MEMORY_INDEX.read_text(encoding="utf-8").strip()
+    return text if text else ""
+
+
+# 构建系统提示词（已经废弃的半静态加载）
+def build_system() -> str:
+    """构建完整系统提示词。
+
+    系统提示词包含当前工作目录、运行环境、任务规划要求、可用 skill
+    目录，以及可选的记忆索引片段。
+
+    Returns:
+        str: 拼装后的系统提示词。
+    """
+    catalog = list_skill()
+    index = read_memory_index()
+    memories_section = f"\n\nMemories available:\n{index}" if index else ""
+
+    return (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。"
+          f"在开始任何多步骤任务之前，请使用 todo_write 来规划您的步骤。"
+          f"当前可用的 skill 有：{catalog}"
+          f"对于复杂的子问题，可以使用任务工具生成子智能体。"
+          f"{memories_section}"
+)
+
+
+# ═══════════════════════════════════════════════════════════
+# 构建系统提示词
+# ═══════════════════════════════════════════════════════════
+
+PROMPT_SECTIONS = {
+    "identity": "你是是一个编码助手，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。",
+    "tools": f"当前可用的 tool 有：{', '.join([tool['name'] for tool in TOOLS_LIST])}",
+    "workspace": f"当前工作目录是 {WORKDIR}",
+    "memory": "相关记忆内容将在下方插入（如有）。"
+}
+
+
+# 组装系统提示词
+def assemble_system_prompt(context: dict) -> str:
+    """根据静态片段和运行时上下文组装系统提示词。
+
+    Args:
+        context (dict): 运行时上下文。当 ``memories`` 存在且非空时，
+            会作为记忆片段追加到提示词末尾。
+
+    Returns:
+        str: 使用空行分隔的完整系统提示词文本。
+    """
+    sections = []
+
+    sections.append(PROMPT_SECTIONS["identity"])
+    sections.append(PROMPT_SECTIONS["tools"])
+    sections.append(PROMPT_SECTIONS["workspace"])
+
+    memories = context.get("memories", "")
+    if memories:
+        sections.append(f"相关记忆：\n{memories}")
+
+    return "\n\n".join(sections)
+
+
+_last_context_key = None
+_last_prompt = None
+
+# 获得系统提示词
+def get_system_prompt(context: dict) -> str:
+    """获取当前上下文对应的系统提示词。
+
+    缓存键由 ``context`` 的稳定 JSON 表示生成。因此，键顺序不同但内容
+    等价的字典会复用同一份提示词；JSON 原生不支持的值会通过 ``str`` 转换。
+
+    Args:
+        context (dict): 用于组装提示词的运行时上下文。
+
+    Returns:
+        str: 上下文未变化时返回缓存提示词，否则返回重新组装的提示词。
+    """
+    global _last_context_key, _last_prompt
+
+    # 将 Python 对象序列化为 JSON 字符串。
+    # sort_keys=True: 字典的键强制按字母升序排序后输出 JSON。
+    # ensure_ascii=False: 直接输出原始中文 / 特殊字符，不转义成 Unicode 转义字符。
+    # default=str: 处理 JSON 原生不支持序列化的对象，如 None、datetime 等。
+    key = json.dumps(context, sort_keys = True, ensure_ascii = False, default = str)
+    if key == _last_context_key and _last_prompt:
+        cli.put_agent_other_info("  \033[90m[cache init]系统提示词未变化\033[0m")
+        return _last_prompt
+
+    # 更新系统提示词
+    _last_context_key = key
+    _last_prompt = assemble_system_prompt(context)
+
+    # 打印加载的段落
+    loaded = ["identity", "tools", "workspace"]
+    if context.get("memories"):
+        loaded.append("memory")
+    cli.put_agent_other_info(f"  \033[32m[assemble] 片段：{', '.join(loaded)}\033[0m")
+    
+    return _last_prompt
+
+
+# 更新上下文
+def update_context(context: dict, messages: list) -> dict:
+    """构建提示词组装器需要的运行时上下文。
+
+    Args:
+        context (dict): 现有会话上下文。该参数用于保持调用接口兼容，
+            函数不会修改它。
+        messages (list): 会话消息列表。该参数用于保持调用接口兼容，
+            函数不会修改它。
+
+    Returns:
+        dict: 包含已启用工具名、工作目录路径，以及可选记忆索引内容的上下文。
+    """
+    memories = ""
+    if MEMORY_INDEX.exists():
+        content = MEMORY_INDEX.read_text(encoding = "utf-8").strip()
+        if content:
+            memories = content
+    return {
+        "enabled_tools": list(TOOLS_HANDLERS.keys()),
+        "workspace": str(WORKDIR),
+        "memories": memories,
+    }

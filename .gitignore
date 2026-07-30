@@ -14,3 +14,6 @@ workspace/
 # Documentation
 doc/llm_config.md
 .agents/transcripts/
+.agents/.task_output/
+.agents/.memory/
+
