@@ -341,6 +341,8 @@ def extract_memories(messages: list):
                     model_pattern = "mini",
                 )
         text = extract_text(response.content).strip()
+        if not text:
+            return
         # 提取 JSON 文本段，使用“？”非贪婪匹配，排配第一个 JSON 文本段
             # 利用**正则表达式（Regular Expression）**在一段名为 text 的文本中，
             # 寻找并提取第一个被方括号 [...] 包裹的 JSON 文本段。
