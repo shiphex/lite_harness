@@ -13,6 +13,8 @@ import re
 import json
 import config
 import api
+import cli
+
 
 WORKDIR = config.Config().get_project_path()
 """项目工作目录路径。"""
@@ -346,6 +348,7 @@ def extract_memories(messages: list):
 
         # 解析 JSON，排除空文本段
         if not match:
+            cli.inform_system_info("\n[Memory: 提取失败] 模型未返回 JSON 数组")
             return
         items = json.loads(match.group())
         if not items:
@@ -361,9 +364,9 @@ def extract_memories(messages: list):
                 write_memory_file(name, mem_type, desc, body)
                 count += 1
         if count:
-            print(f"\n\033[33m[Memory: 成功提取 {count} 条新记忆]\033[0m")
-    except Exception:
-        pass
+            cli.inform_system_info(f"\n[Memory: 成功提取 {count} 条新记忆]")
+    except Exception as e:
+        cli.inform_system_info(f"\n[Memory: 提取失败] {e}")
 
 
 # ------------------------- 整理记忆 -------------------------
@@ -429,7 +432,7 @@ def consolidate_memories():
             if desc and body:
                 write_memory_file(name, mem_type, desc, body)
 
-        print(f"\n\033[33m[Memory: 成功整理 {len(files)} → {len(items)} 条记忆]\033[0m")
+        cli.inform_system_info(f"\n[Memory: 成功整理 {len(files)} → {len(items)} 条记忆]")
 
     except Exception:
         pass
