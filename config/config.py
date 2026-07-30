@@ -136,6 +136,8 @@ class Config():
             "tool_result_dir": WORKDIR / ".agents" / ".task_output" / "tool_results",
             "transcript_dir": WORKDIR / ".agents" / "transcripts",
             "skill_dir": WORKDIR / ".agents" / "skills",
+            "memory_dir": WORKDIR / ".agents" / ".memory",
+            "memory_index": WORKDIR / ".agents" / ".memory" / "MEMORY.md"
         }
 
         # 系统提示词相关配置
@@ -149,6 +151,7 @@ class Config():
         self.CTX_TOKENS = kwargs.get("ctx_tokens", 20480)                           # 总上下文窗口大小
         self.MAIN_OUTPUT_TOKENS = int(self.CTX_TOKENS * 0.25)                       # 主输出预算
         self.SUMMARY_OUTPUT_TOKENS = min(int(self.CTX_TOKENS * 0.10), kwargs.get("max_tokens", 2048)) # 摘要输出预算
+        self.MINI_OUTPUT_TOKENS = int(self.CTX_TOKENS * 0.01)                       # 最小输出预算
         self.SAFETY_TOKENS = int(self.CTX_TOKENS * 0.10)                            # 安全余量
         self.MAX_INLINE_TOOL_RESULT_TOKENS = int(self.CTX_TOKENS * 0.10)                                # 单个工具调用输出结果触发值（0.1）
         self.MAIN_INPUT_BUDGET = self.CTX_TOKENS - self.MAIN_OUTPUT_TOKENS - self.SAFETY_TOKENS         # 主输入预算（0.65）
@@ -230,6 +233,7 @@ class Config():
                     "CTX_TOKENS",
                     "MAIN_OUTPUT_TOKENS",
                     "SUMMARY_OUTPUT_TOKENS",
+                    "MINI_OUTPUT_TOKENS",
                     "SAFETY_TOKENS",
                     "MAX_INLINE_TOOL_RESULT_TOKENS",
                     "MAIN_INPUT_BUDGET",

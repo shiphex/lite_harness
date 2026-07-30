@@ -13,7 +13,8 @@ from anthropic import Anthropic
 
 # 模型模式选择
 model_pattern = ["default",
-                 "summary"]
+                 "summary",
+                 "mini"]
 
 def call_anthropic_model(model_info: dict,
                          content_info: dict,
@@ -41,6 +42,7 @@ def call_anthropic_model(model_info: dict,
     client = Anthropic(base_url = model_info["model_url"], api_key = model_info["api_key"])   
 
     max_tokens = content_info["SUMMARY_OUTPUT_TOKENS"] if model_pattern == "summary" else content_info["MAIN_OUTPUT_TOKENS"]
+    max_tokens = content_info["MINI_OUTPUT_TOKENS"] if model_pattern == "mini" else max_tokens
 
     response = client.messages.create(
         model = model_info["model_name"],

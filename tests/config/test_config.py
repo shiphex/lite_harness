@@ -50,6 +50,12 @@ def test_config_model_config_uses_api_key():
     assert result["api_key"] == "no-key"
 
 
+def test_config_content_length_includes_mini_output_tokens():
+    result = Config(**parse_args([])).get_content_length()
+
+    assert result["MINI_OUTPUT_TOKENS"] == 204
+
+
 def test_configure_defaults_are_used_by_config():
     configure([])
 

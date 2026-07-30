@@ -42,6 +42,8 @@ TRANSCRIPT_DIR = config.Config().get_path_config("transcript_dir")
 
 # ----------------------- L1 裁剪式压缩 ----------------------
 
+def estimate_size(msgs): return len(str(msgs))
+
 def _block_type(block):
     """ 检测 block 的类型
     
