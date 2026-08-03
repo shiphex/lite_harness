@@ -44,6 +44,7 @@ Agent
 # 本项目参考
 - [learn-claude-code](https://github.com/shareAI-lab/learn-claude-code)
 - [Claw Code](https://github.com/ultraworkers/claw-code)
+- [-awesome-cc-harness](https://github.com/WanLanglin/-awesome-cc-harness)
 
 # 暂时未解决的问题
 1. 当用户拒绝执行指令时，Agent 依然还会尝试多次执行该命令或类似命令，然后询问用户是否继续。
