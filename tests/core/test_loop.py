@@ -342,3 +342,24 @@ def test_query_loop_reacts_to_prompt_too_long_error(monkeypatch):
     assert state["has_attempted_reactive_compact"] is True
     assert result_state is state
     assert status == {"reason": "completed"}
+
+
+def test_query_loop_stops_at_max_turns(monkeypatch):
+    calls = []
+    tool_block = ToolCallPart(id="tool-1", name="demo_tool", input={})
+
+    class FakeAdapter:
+        def complete(self, request):
+            calls.append(request)
+            return ModelResponse(stop_reason="tool_use", content=[tool_block])
+
+    _patch_query_loop_dependencies(monkeypatch, FakeAdapter())
+    monkeypatch.setattr(loop.tools, "call_tool", lambda name, input: "ok")
+
+    policy = _query_policy()
+    policy["max_turns"] = 1
+    state, status = loop.query_loop(policy, _query_state())
+
+    assert len(calls) == 1
+    assert state["turn_count"] == 1
+    assert status == {"reason": "max_turns"}
