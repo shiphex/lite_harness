@@ -148,14 +148,16 @@ def call_langchain_model(
     system_prompt: str = "",
     tools: list = [],
     model_pattern: str = "default",
+    max_tokens: int | None = None,
 ):
     """调用 LangChain OpenAI 模型接口 object."""
     # 初始化 LangChain OpenAI 封装。
+    output_tokens = max_tokens if max_tokens is not None else get_max_tokens(content_info, model_pattern)
     llm = ChatOpenAI(
         model=model_info["model_name"],
         api_key=model_info["api_key"],
         base_url=model_info["model_url"],
-        max_completion_tokens=get_max_tokens(content_info, model_pattern),
+        max_completion_tokens=output_tokens,
     )
 
     declarations = anthropic_tools_to_function_declarations(tools)
