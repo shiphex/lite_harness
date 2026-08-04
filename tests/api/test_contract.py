@@ -12,3 +12,23 @@ def test_response_exposes_text_and_tool_calls():
 
     assert response.text == "hello"
     assert response.tool_calls[0].id == "call-1"
+
+
+def test_response_message_blocks_are_canonical_dicts():
+    response = ModelResponse(
+        content=[
+            TextPart(text="hello"),
+            ToolCallPart(id="call-1", name="test_tool", input={"value": 1}),
+        ],
+        stop_reason="tool_use",
+    )
+
+    assert response.message_blocks() == [
+        {"type": "text", "text": "hello"},
+        {
+            "type": "tool_use",
+            "id": "call-1",
+            "name": "test_tool",
+            "input": {"value": 1},
+        },
+    ]

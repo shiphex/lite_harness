@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-import api.gemini_api as gemini_api
+import api.old_api.gemini_api as gemini_api
 from google.genai import types
 
 

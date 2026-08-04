@@ -91,12 +91,71 @@ def test_with_retry_raises_when_retries_are_exhausted(monkeypatch):
         error_recovery.with_retry(lambda: (_ for _ in ()).throw(RateLimitError("429")), state)
 
 
+def test_with_llm_retry_supports_mapping_state():
+    state = {
+        "consecutive_529": 0,
+        "current_model": {"model_name": "primary"},
+    }
+    policy = {"fallback_model": {"model_name": "fallback", "API": "Anthropic"}}
+
+    assert error_recovery.with_llm_retry(lambda: "ok", state, policy) == "ok"
+    assert state["consecutive_529"] == 0
+    assert state["current_model"] == {"model_name": "primary"}
+
+
+def test_with_llm_retry_switches_mapping_state_to_fallback(monkeypatch):
+    state = {
+        "consecutive_529": 0,
+        "current_model": {"model_name": "primary"},
+    }
+    policy = {
+        "fallback_model": {
+            "model_name": "fallback",
+            "API": "OpenAI",
+        }
+    }
+    calls = []
+
+    monkeypatch.setattr(error_recovery, "MAX_RETRIES", 4)
+    monkeypatch.setattr(error_recovery, "MAX_CONSECUTIVE_529", 2)
+    monkeypatch.setattr(error_recovery, "retry_delay", lambda attempt: 0)
+    monkeypatch.setattr(error_recovery.time, "sleep", lambda delay: None)
+
+    def overloaded_then_success():
+        calls.append("call")
+        if len(calls) <= 2:
+            raise OverloadedError("server overloaded")
+        return "ok"
+
+    assert error_recovery.with_llm_retry(overloaded_then_success, state, policy) == "ok"
+    assert state["current_model"] == policy["fallback_model"]
+    assert state["consecutive_529"] == 0
+
+
+def test_output_tokens_recovery_supports_mapping_state():
+    state = {
+        "max_output_tokens_override": False,
+        "recovery_count": 0,
+    }
+    messages = [{"role": "user", "content": "start"}]
+
+    returned_state, returned_messages = error_recovery.output_tokens_too_long_error(
+        messages,
+        state,
+    )
+
+    assert returned_state is state
+    assert returned_messages is messages
+    assert state["max_output_tokens_override"] is True
+
+
 @pytest.mark.parametrize(
     "message",
     [
         "prompt is too long",
         "context_length_exceeded",
         "max_context_window reached",
+        "exceed_context_size: request exceeds the available context size",
         "The PROMPT became LONG after tool output",
     ],
 )
