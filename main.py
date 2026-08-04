@@ -3,9 +3,11 @@ import config
 
 def main():
     from core import agent
+    from core import master_agent
 
     print("Hello from wiki-json-to-llm-format!")
-    agent()
+    # agent()
+    master_agent()
 
 
 
