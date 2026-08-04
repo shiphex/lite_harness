@@ -13,9 +13,8 @@ import tools
 import hook
 import builtin
 
-from api.anthropic_adapter import AnthropicAdapter
+from api.adapter_factory import create_adapter
 from api.contract import ModelRequest
-
 
 
 def compact_pipeline(messages: list):
@@ -188,18 +187,19 @@ def query_loop(RunPolicy: dict, state: dict):
 
         # 4. 调用 LLM
         try: 
-            adapter = AnthropicAdapter.from_model_config({
-                "model_url": "http://localhost:8000",
-                "api_key": "no-key",
-            })
-            request = ModelRequest(
-                model = state["current_model"]("model_name"),
-                tools = tools.TOOLS_LIST,
-                system_prompt = system,
-                messages = request_messages,
-                max_tokens = state["max_output_tokens"],
+            response = builtin.with_llm_retry(
+                lambda: create_adapter(state["current_model"]).complete(
+                    ModelRequest(
+                        model = state["current_model"]["model_name"],
+                        tools = tools.TOOLS_LIST,
+                        system_prompt = system,
+                        messages = request_messages,
+                        max_tokens = state["max_output_tokens"],
+                    )
+                ),
+                state,
+                RunPolicy,
             )
-            response = builtin.with_llm_retry(adapter.complete(request), state, RunPolicy)
         # 5. 错误恢复
         except Exception as e:
             if builtin.is_prompt_too_long_error(e):
@@ -214,6 +214,7 @@ def query_loop(RunPolicy: dict, state: dict):
                      "text": "[Error] 上下文过大，无法继续。"}]})
                 state["messages"] = messages
                 return state, {"reason": "prompt_too_long"}
+            raise
 
         # 若 model 回答的文本内容超过上下文大小，执行 output_tokens_too_long_error 函数
         if response.stop_reason == "max_tokens":
@@ -227,7 +228,10 @@ def query_loop(RunPolicy: dict, state: dict):
             continue
 
         # 保存模型输出
-        messages.append({"role": "assistant", "content": response.content})
+        messages.append({
+            "role": "assistant",
+            "content": response.message_blocks(),
+        })
 
         # 8. Stop Hook → 终止或继续
         # 判断模型返回消息中是否有工具调用
@@ -240,8 +244,8 @@ def query_loop(RunPolicy: dict, state: dict):
             force = hook.trigger_hooks("Stop", messages)
             if force:
                 messages.append({"role": "user", "content": force})
-                state["messages"] = messages
-                return state, {"reason": "completed"}          # return Terminal — 唯一的退出点
+            state["messages"] = messages
+            return state, {"reason": "completed"}               # return Terminal — 唯一的退出点
 
         # 6. 收集 tool_use 块
         for block in response.content:

@@ -82,7 +82,7 @@ def with_llm_retry(fn, state, RunPolicy):
         # 尝试执行函数
         try:
             result = fn()
-            state.consecutive_529 = 0
+            state["consecutive_529"] = 0
             return result
         except Exception as e:
             name = type(e).__name__
@@ -100,18 +100,18 @@ def with_llm_retry(fn, state, RunPolicy):
 
             # 处理 529 过载错误
             if "overloaded" in name.lower() or "529" in msg or "overloaded" in msg:
-                state.consecutive_529 += 1
-                if state.consecutive_529 >= MAX_CONSECUTIVE_529:
+                state["consecutive_529"] += 1
+                if state["consecutive_529"] >= MAX_CONSECUTIVE_529:
                     if RunPolicy["fallback_model"]:
-                        state.current_model = RunPolicy["fallback_model"]["model_name"]
-                        state.consecutive_529 = 0
+                        state["current_model"] = dict(RunPolicy["fallback_model"])
+                        state["consecutive_529"] = 0
                         print(
                             f"  \033[33m[529 x{MAX_CONSECUTIVE_529}] "
                             f"switching to fallback model "
                             f"{RunPolicy['fallback_model']['model_name']} and retrying\033[0m"
                         )
                     else:
-                        state.consecutive_529 = 0
+                        state["consecutive_529"] = 0
                         print(
                             f"  \033[33m[529 x{MAX_CONSECUTIVE_529}] "
                             "no fallback model configured; retrying\033[0m"
@@ -202,6 +202,7 @@ def is_prompt_too_long_error(e: Exception) -> bool:
         or "prompt is too long" in msg
         or "context_length_exceeded" in msg
         or "max_context_window" in msg
+        or "exceed_context_size" in msg
     )
 
 
@@ -216,8 +217,8 @@ def output_tokens_too_long_error(messages: list, state):
     """
 
     # 如果未升级到应急状态，则先升级到应急状态（提高 max_tokens 大小）。
-    if not state.max_output_tokens_override:
-        state.max_output_tokens_override = True
+    if not state["max_output_tokens_override"]:
+        state["max_output_tokens_override"] = True
         print(
             "  \033[33m[max_tokens] escalating output budget "
             f"{default_content_length['MAIN_OUTPUT_TOKENS']} -> "
@@ -226,10 +227,10 @@ def output_tokens_too_long_error(messages: list, state):
         return state, messages
 
     # 如果未超过最大恢复次数，则继续恢复。
-    if state.recovery_count < MAX_RECOVERY_RETRIES:
+    if state["recovery_count"] < MAX_RECOVERY_RETRIES:
         messages.append({"role": "user", "content": CONTINUATION_PROMPT})
-        state.recovery_count += 1
-        print(f"  \033[33m[max_tokens] continuing {state.recovery_count}/{MAX_RECOVERY_RETRIES}\033[0m")
+        state["recovery_count"] += 1
+        print(f"  \033[33m[max_tokens] continuing {state['recovery_count']}/{MAX_RECOVERY_RETRIES}\033[0m")
         return state, messages
 
     # 如果已超过最大恢复次数，则提示用户。

@@ -113,3 +113,31 @@ class ModelResponse:
             for part in self.content
             if isinstance(part, ToolCallPart)
         ]
+
+    def message_blocks(self) -> list[dict[str, Any]]:
+        """Return response content in the canonical history message format."""
+        blocks = []
+        for part in self.content:
+            if isinstance(part, TextPart):
+                blocks.append({"type": "text", "text": part.text})
+                continue
+
+            if isinstance(part, ToolCallPart):
+                block = {
+                    "type": "tool_use",
+                    "id": part.id,
+                    "name": part.name,
+                    "input": part.input or {},
+                }
+                if part.thought_signature is not None:
+                    block["thought_signature"] = part.thought_signature
+                blocks.append(block)
+                continue
+
+            if isinstance(part, dict):
+                blocks.append(dict(part))
+                continue
+
+            raise TypeError(f"Unsupported response content block: {type(part).__name__}")
+
+        return blocks

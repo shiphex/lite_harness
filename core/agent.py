@@ -148,9 +148,11 @@ def master_agent():
         response = history[-1]["content"]
         if isinstance(response, list):
             for block in response:
-                if getattr(block, "type", None) == "text":
+                block_type = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+                if block_type == "text":
                     # 执行系统输出
-                    cli.put_agent_output(block.text)
+                    text = block.get("text", "") if isinstance(block, dict) else block.text
+                    cli.put_agent_output(text)
                     cli.put_agent_other_info(f"当前状态：{status}")
 
 
@@ -201,8 +203,8 @@ def agent():
         response = history[-1]["content"]
         if isinstance(response, list):
             for block in response:
-                if getattr(block, "type", None) == "text":
+                block_type = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+                if block_type == "text":
                     # 执行系统输出
-                    cli.put_agent_output(block.text)
-
-        
+                    text = block.get("text", "") if isinstance(block, dict) else block.text
+                    cli.put_agent_output(text)

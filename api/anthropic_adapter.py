@@ -58,9 +58,25 @@ class AnthropicAdapter(ModelAdapter):
             dict[str, Any]: 可以传给 ``client.messages.create`` 的参数。
         """
         # 当前内部消息和 Anthropic 消息格式接近，先直接复用消息列表。
+        messages = []
+        for message in request.messages:
+            encoded_message = dict(message)
+            content = encoded_message.get("content")
+            if isinstance(content, list):
+                encoded_message["content"] = [
+                    {
+                        key: value
+                        for key, value in block.items()
+                        if key != "thought_signature"
+                    }
+                    if isinstance(block, dict) else block
+                    for block in content
+                ]
+            messages.append(encoded_message)
+
         payload = {
             "model": request.model,
-            "messages": request.messages,
+            "messages": messages,
             "max_tokens": request.max_tokens,
         }
         if request.system_prompt:
