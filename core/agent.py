@@ -15,6 +15,7 @@ import cli
 import hook
 import builtin
 import tools
+import config
 from .loop import agent_loop
 from .loop import query_loop
 
@@ -112,23 +113,24 @@ def master_agent():
         history.append({"role": "user", "content": user_input})
 
         # 配置 queryLoop 循环的 RunPolicy
-        agent_RunPolicy = asdict(RunPolicy(max_turns = 300, 
-                                    prompt = "", 
-                                    model = {"API": "Anthropic", 
-                                            "model_url": "http://localhost:8000", 
-                                            "api_key": "no-key", 
-                                            "model_name": "Qwen3.5"},
-                                    fallback_model = {"API": "Anthropic", 
-                                         "model_url": "http://localhost:8000", 
-                                         "api_key": "no-key", 
-                                         "model_name": "Qwen3.5_4B"},
+        configured_model = dict(config.Config().get_model_config())
+        fallback_model = dict(configured_model)
+        fallback_model["model_name"] = (
+            configured_model.get("fallback_model_name")
+            or configured_model["model_name"]
+        )
+        content_config = config.Config().get_content_length()
+        agent_RunPolicy = asdict(RunPolicy(max_turns = 300,
+                                    prompt = "",
+                                    model = configured_model,
+                                    fallback_model = fallback_model,
                                     tools_list = tools.TOOLS_LIST, 
                                     can_ask_user = True, 
                                     context = context))
         
         # 初始化 queryLoop 循环的运行状态
         agent_state = asdict(state(messages = history, 
-                            max_output_tokens = 4096,
+                            max_output_tokens = content_config["MAIN_OUTPUT_TOKENS"],
                             toolUse_prompt = "",
                             turn_count = 0,
                             transition = "", 
@@ -142,10 +144,18 @@ def master_agent():
         agent_state, status = query_loop(agent_RunPolicy, agent_state)
 
         # 更新上下文
+        history = agent_state.get("messages", history)
         context = builtin.update_context(context, history)
 
         # 执行系统输出
-        response = history[-1]["content"]
+        response = next(
+            (
+                message.get("content")
+                for message in reversed(history)
+                if message.get("role") == "assistant"
+            ),
+            "",
+        )
         if isinstance(response, list):
             for block in response:
                 block_type = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)

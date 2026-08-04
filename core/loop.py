@@ -176,8 +176,13 @@ def query_loop(RunPolicy: dict, state: dict):
     #2. 配置加载（提示词加载、模型加载）  
     # 初始化系统提示词
     system = builtin.get_system_prompt(context)
-    
+    max_turns = RunPolicy.get("max_turns", 300)
+
     while True:
+        if state.get("turn_count", 0) >= max_turns:
+            state["messages"] = messages
+            return state, {"reason": "max_turns"}
+        state["turn_count"] = state.get("turn_count", 0) + 1
         # 1. 解析状态参数(state)
         # 2. 执行压缩管线
         pre_compress, messages = compact_pipeline(messages)
