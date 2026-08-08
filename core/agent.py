@@ -20,7 +20,7 @@ from .loop import agent_loop
 from .loop import query_loop
 
 
-@dataclass(frozen=True)
+@dataclass()
 class RunPolicy():
     """ 用于配置 queryLoop 循环的参数
 
@@ -43,7 +43,6 @@ class RunPolicy():
     fallback_model: Dict = field(default_factory=dict)
     tools_list: List = field(default_factory=list)
     can_ask_user: bool = False
-    context: Dict = field(default_factory=dict)
 
 
 @dataclass()
@@ -63,6 +62,7 @@ class state():
     - recovery_count: 最大输出token数恢复次数
     """
     messages: List = field(default_factory=list)
+    context: Dict = field(default_factory=dict)
     max_output_tokens: int = 4096
     toolUse_prompt: str = ""
     turn_count: int = 0
@@ -125,20 +125,20 @@ def master_agent():
                                     model = configured_model,
                                     fallback_model = fallback_model,
                                     tools_list = tools.TOOLS_LIST, 
-                                    can_ask_user = True, 
-                                    context = context))
+                                    can_ask_user = True))
         
         # 初始化 queryLoop 循环的运行状态
         agent_state = asdict(state(messages = history, 
-                            max_output_tokens = content_config["MAIN_OUTPUT_TOKENS"],
-                            toolUse_prompt = "",
-                            turn_count = 0,
-                            transition = "", 
-                            max_output_tokens_override = False,
-                            recovery_count = 3, 
-                            has_attempted_reactive_compact = False,
-                            current_model = agent_RunPolicy["model"],
-                            consecutive_529 = 0 ))
+                                    context = context, 
+                                    max_output_tokens = content_config["MAIN_OUTPUT_TOKENS"],
+                                    toolUse_prompt = "",
+                                    turn_count = 0,
+                                    transition = "", 
+                                    max_output_tokens_override = False,
+                                    recovery_count = 3, 
+                                    has_attempted_reactive_compact = False,
+                                    current_model = agent_RunPolicy["model"],
+                                    consecutive_529 = 0 ))
 
         # 执行 agent_loop 工作循环
         agent_state, status = query_loop(agent_RunPolicy, agent_state)

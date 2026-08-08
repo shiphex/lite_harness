@@ -7,6 +7,7 @@ Typical usage example:
     agent_loop(messages)
 """
 
+from dataclasses import dataclass
 import cli
 import api
 import tools
@@ -14,7 +15,7 @@ import hook
 import builtin
 
 from api.adapter_factory import create_adapter
-from api.contract import ModelRequest
+from api.contract import ModelRequest, ModelResponse
 
 
 def compact_pipeline(messages: list):
@@ -91,61 +92,62 @@ def struct_massages(messages: list, memories_content: str):
     return request_messages
 
 
-def execute_tool(block: dict, messages: list):
+def execute_tool(response: ModelResponse):
     """ 执行工具调用。
 
     Args:
-        block (dict): 包含工具调用信息的字典。
-        messages (list): 包含当前会话历史记录的列表。
+        response (ModelResponse): 包含工具调用信息的响应。
     
     Returns:
         list: 更新后的会话历史记录列表，包含工具调用结果。
     """
 
-    # 7. 执行工具调用
-
     # 初始化模型输出储存列表
     results = []
+    status = ""
+    # 6. 收集 tool_use 块
+    for block in response.content:
+        if block.type != "tool_use":
+            continue                    # Continue Site 7: Tool Execution
 
-    # 打印工具调用名称
-    cli.put_agent_other_info(f"[TOOL]: {block.name}")
+        # 7. 执行工具调用
+        # 打印工具调用名称
+        cli.put_agent_other_info(f"[TOOL]: {block.name}")
 
-    # 对调用了压缩工具进行处理
-    if block.name == "compact":
-        messages[:] = tools.compact_history(messages)
+        # 对调用了压缩工具进行处理
+        if block.name == "compact":
+            messages[:] = tools.compact_history(messages)
+            results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": "[已压缩： 对话历史已生成摘要。]",
+            })
+            status = "compact"
+            return results, status
+
+        # 在执行之前，触发 PreToolUse hook
+        blocked = hook.trigger_hooks("PreToolUse", block)
+        if blocked:
+            # 返回并记录 PreToolUse hook 的结果
+            results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(blocked)})
+            continue
+
+        # 执行工具调用
+        output = tools.call_tool(block.name, block.input)
+
+        # 触发 PostToolUse hook
+        hook.trigger_hooks("PostToolUse", block, output)
+
+        cli.put_agent_other_info(f"{output[:200]}")
+        # 保存工具调用结果
         results.append({
             "type": "tool_result",
             "tool_use_id": block.id,
-            "content": "[已压缩： 对话历史已生成摘要。]",
+            "content": output,
         })
-        messages.append({"role": "user", "content": results})
-        return messages
-
-    # 在执行之前，触发 PreToolUse hook
-    blocked = hook.trigger_hooks("PreToolUse", block)
-    if blocked:
-        # 返回并记录 PreToolUse hook 的结果
-        results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(blocked)})
-        messages.append({"role": "user", "content": results})
-        return messages
-    
-    # 执行工具调用
-    output = tools.call_tool(block.name, block.input)
-    
-    # 触发 PostToolUse hook
-    hook.trigger_hooks("PostToolUse", block, output)
-    
-    cli.put_agent_other_info(f"{output[:200]}")
-    # 保存工具调用结果
-    results.append({
-        "type": "tool_result",
-        "tool_use_id": block.id,
-        "content": output,
-    })
-    messages.append({"role": "user", "content": results})
-    return messages
-    
-
+        
+    status = "complete"
+    return results, status
 
 
 def query_loop(RunPolicy: dict, state: dict):
@@ -166,24 +168,25 @@ def query_loop(RunPolicy: dict, state: dict):
         None
     """
     
-    #1. 记忆提取
-    # 加载需要注入本轮会话的记忆内容
+    # 0. 解析权限、状态参数
     messages = state["messages"]
-    context = RunPolicy["context"]# LLM 状态加载
+    context = state["context"]
+    model = state["current_model"]
+    max_turns = RunPolicy.get("max_turns", 0)
+    tools = RunPolicy["tools_list"]
+    # 1. 记忆提取、提示词加载
     memories_content = builtin.load_memories(messages)
-    
-
-    #2. 配置加载（提示词加载、模型加载）  
-    # 初始化系统提示词
-    system = builtin.get_system_prompt(context)
-    max_turns = RunPolicy.get("max_turns", 300)
 
     while True:
-        if state.get("turn_count", 0) >= max_turns:
-            state["messages"] = messages
-            return state, {"reason": "max_turns"}
-        state["turn_count"] = state.get("turn_count", 0) + 1
-        # 1. 解析状态参数(state)
+        if max_turns > 0:
+            if state.get("turn_count", 0) >= max_turns:
+                state["messages"] = messages
+                return state, {"reason": "max_turns"}
+            state["turn_count"] = state.get("turn_count", 0) + 1
+
+        context = builtin.update_context(context, messages)
+        system = builtin.get_system_prompt(context)
+
         # 2. 执行压缩管线
         pre_compress, messages = compact_pipeline(messages)
         
@@ -193,10 +196,10 @@ def query_loop(RunPolicy: dict, state: dict):
         # 4. 调用 LLM
         try: 
             response = builtin.with_llm_retry(
-                lambda: create_adapter(state["current_model"]).complete(
+                lambda: create_adapter(model).complete(
                     ModelRequest(
-                        model = state["current_model"]["model_name"],
-                        tools = tools.TOOLS_LIST,
+                        model = model["model_name"],
+                        tools = tools,
                         system_prompt = system,
                         messages = request_messages,
                         max_tokens = state["max_output_tokens"],
@@ -253,17 +256,15 @@ def query_loop(RunPolicy: dict, state: dict):
             return state, {"reason": "completed"}               # return Terminal — 唯一的退出点
 
         # 6. 收集 tool_use 块
-        for block in response.content:
-            if block.type != "tool_use":
-                continue                    # Continue Site 7: Tool Execution
-            # 7. 执行工具调用
-            messages = execute_tool(block, messages)
+        # 7. 执行工具调用
+        results, status = execute_tool(response)
+        if status == "compact":
+            continue
+        else:
+            messages.append({"role": "user", "content": results})
             
         # 更新上下文
-        context = builtin.update_context(context, messages)
-        system = builtin.get_system_prompt(context)
 
-        
         # 9. 更新状态 → continue
 
 

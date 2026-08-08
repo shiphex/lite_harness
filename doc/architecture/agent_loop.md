@@ -20,7 +20,7 @@ queryLoop 循环负责调用模型接口，执行工具调用，保存模型输�
 - fallback_model: 失败时调用的模型
 - tools_list: 可以使用的工具的列表
 - can_ask_user: 是否可以询问用户问题
-- context: 上下文参数，用于存储会话中的记忆、系统状态等信息
+
 
 
 ## 2.2 state 
@@ -28,6 +28,7 @@ queryLoop 循环负责调用模型接口，执行工具调用，保存模型输�
 
 参数包括：
 - messages: 对话消息列表
+- context: 上下文参数，用于存储会话中的记忆、系统状态等信息
 - max_output_tokens: 最大输出token数
 - toolUse_prompt: 工具调用提示词（动态提示词）
 - turn_count: 当前循环次数计数
@@ -60,11 +61,10 @@ return { reason: 'model_error', error }  # 意外异常
 
 流程：  
 进入循环前：
-1. 记忆提取
-2. 配置加载（提示词加载、模型加载）  
+0. 解析权限、状态参数
+1. 记忆提取、提示词加载
 
 进入循环后：
-1. 解析状态参数(state)
 2. 执行压缩管线
 3. 规范化请求消息构建
 4. 调用 LLM
