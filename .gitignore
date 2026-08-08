@@ -16,5 +16,4 @@ workspace/
 .agents/.memory/
 
 # Documentation
-doc/llm_config.md
-doc/questions.md
+doc/dev_doc/
