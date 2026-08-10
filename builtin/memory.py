@@ -11,7 +11,6 @@ import time
 import yaml
 import re
 import json
-import config
 import api
 import cli
 from dataclasses import dataclass
@@ -109,7 +108,14 @@ def extract_text(content) -> str:
     # 从 messages content 块中提取文本。
     if not isinstance(content, list):
         return str(content)
-    return "\n".join(getattr(b, "text", "") for b in content if getattr(b, "type", "") == "text")
+    return "\n".join(
+        str(b.get("text", ""))
+        if isinstance(b, dict) and b.get("type") == "text"
+        else str(getattr(b, "text", ""))
+        for b in content
+        if (isinstance(b, dict) and b.get("type") == "text")
+        or getattr(b, "type", "") == "text"
+    )
 
 
 # ═══════════════════════════════════════════════════════════
@@ -122,7 +128,7 @@ def read_memory_file(self, filename: str) -> str | None:
     """读取指定记忆文件的完整文本内容。
 
     Args:
-        filename (str): 记忆文件名，文件应位于 MEMORY_DIR 目录下。
+        filename (str): 记忆文件名，文件应位于当前 namespace 的 memory 根目录下。
 
     Returns:
         str | None: 文件存在时返回其 UTF-8 文本内容；文件不存在时返回 None。
@@ -132,7 +138,7 @@ def read_memory_file(self, filename: str) -> str | None:
 
     path = self.root / filename
     
-    if not path.exists():
+    if not path.is_file():
         return None
     return path.read_text(encoding="utf-8")
 
@@ -140,7 +146,7 @@ def read_memory_file(self, filename: str) -> str | None:
 def list_memory_files(self) -> list[dict]:
     """列出可用的记忆文件及其元数据。
 
-    扫描 MEMORY_DIR 下的 Markdown 文件，解析 YAML frontmatter，并返回
+    扫描当前 namespace 的 memory 根目录下的 Markdown 文件，解析 YAML frontmatter，并返回
     文件名、名称、描述、类型和正文等用于检索与加载的字段。
 
     Returns:
@@ -152,7 +158,7 @@ def list_memory_files(self) -> list[dict]:
     
     result = []
     for f in sorted(self.root.glob("*.md")):
-        if f.name == "MEMORY.md":
+        if f.name == self.index_path.name or not f.is_file():
             continue
 
         raw = f.read_text(encoding="utf-8")
@@ -298,12 +304,12 @@ def load_memories(self, messages: list) -> str:
 def _rebuild_index(self):
     """根据当前记忆文件重建记忆索引文件。
 
-    遍历 MEMORY_DIR 下的记忆 Markdown 文件，提取名称和描述后写入
-    MEMORY_INDEX（MEMORY.md 文件），供后续人工查看或系统检索。
+    遍历当前 namespace 的 memory 根目录下的 Markdown 文件，提取名称和描述后写入
+    当前 namespace 的 MEMORY.md 文件，供后续人工查看或系统检索。
     """
     lines = []
     for f in sorted(self.root.glob("*.md")):
-        if f.name == "MEMORY.md":
+        if f.name == self.index_path.name or not f.is_file():
             continue
         raw = f.read_text(encoding="utf-8")
         meta, body = _parse_frontmatter(raw)
@@ -360,10 +366,7 @@ def extract_memories(self, messages: list):
         role = msg.get("role", "?")
         content = msg.get("content", "")
         if isinstance(content, list):
-            content = " ".join(
-                str(getattr(b, "text", "")) for b in content
-                if getattr(b, "type", None) == "text"
-            )
+            content = extract_text(content)
         if isinstance(content, str) and content.strip():
             dialogue_parts.append(f"{role}: {content}")
     dialogue = "\n".join(dialogue_parts)
@@ -498,4 +501,3 @@ def consolidate_memories(self):
 
     except Exception:
         pass
-

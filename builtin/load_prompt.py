@@ -13,6 +13,7 @@ Typical usage example:
 import json
 import config
 import cli
+from pathlib import Path
 
 try:
     from tools.load_skill import SKILL_REGISTRY
@@ -55,15 +56,16 @@ def list_skill() -> str:
 
 
 # 读取记忆索引
-def read_memory_index():
+def read_memory_index(memory_index: Path | None = None):
     """读取记忆索引文件内容。
 
     Returns:
         str: 去除首尾空白后的记忆索引文本；文件不存在或内容为空时返回空字符串。
     """
-    if not MEMORY_INDEX.exists():
+    index_path = memory_index or MEMORY_INDEX
+    if not index_path.is_file():
         return ""
-    text = MEMORY_INDEX.read_text(encoding="utf-8").strip()
+    text = index_path.read_text(encoding="utf-8").strip()
     return text if text else ""
 
 
@@ -166,7 +168,11 @@ def get_system_prompt(context: dict) -> str:
 
 
 # 更新上下文
-def update_context(context: dict, messages: list) -> dict:
+def update_context(
+    context: dict,
+    messages: list,
+    memory_index: Path | None = None,
+) -> dict:
     """构建提示词组装器需要的运行时上下文。
 
     Args:
@@ -178,11 +184,7 @@ def update_context(context: dict, messages: list) -> dict:
     Returns:
         dict: 包含已启用工具名、工作目录路径，以及可选记忆索引内容的上下文。
     """
-    memories = ""
-    if MEMORY_INDEX.exists():
-        content = MEMORY_INDEX.read_text(encoding = "utf-8").strip()
-        if content:
-            memories = content
+    memories = read_memory_index(memory_index)
     return {
         "enabled_tools": list(TOOLS_HANDLERS.keys()),
         "workspace": str(WORKDIR),
