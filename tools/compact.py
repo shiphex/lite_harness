@@ -229,7 +229,9 @@ def persist_large_output(tool_use_id, output):
     return f"<persisted-output>\n完整输出所在路径: {path}\n预览:\n{output[:200]}\n</persisted-output>"
 '''
 
-def tool_result_budget(messages, max_bytes: int = TOOL_RESULT_MAX_CHARS, artifacts = None):
+def tool_result_budget(messages, 
+                       max_bytes: int = TOOL_RESULT_MAX_CHARS, 
+                       artifacts = None):
     """ 工具调用结果大小评估与储存函数
     
     Args:

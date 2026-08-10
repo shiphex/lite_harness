@@ -228,7 +228,7 @@ def query_loop(runtime: AgentRuntime):
             if builtin.is_prompt_too_long_error(e):
                 if not state.has_attempted_reactive_compact:
                     print("\033[33m\n⚠ [重新执行压缩]\033[0m")
-                    messages[:] = tools.reactive_compact(messages)
+                    messages[:] = tools.reactive_compact(messages, runtime.artifacts)
                     state.has_attempted_reactive_compact = True
                     continue                # Continue Site 2: Prompt Too Long
                 print("  \033[31m[unrecoverable] 压缩后依然过长。\033[0m")

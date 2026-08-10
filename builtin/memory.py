@@ -53,7 +53,7 @@ class MemoryManager:
         self.index_path = self.root / "MEMORY.md"
 
         if self.policy.can_write:
-            self.index_path.mkdir(parents=True, exist_ok=True)
+            self.root.mkdir(parents=True, exist_ok=True)
 
     def load(self, messages: list) -> str:
         return load_memories(self, messages = messages)
@@ -286,7 +286,7 @@ def load_memories(self, messages: list) -> str:
 
     parts = ["<relevant_memories>"]
     for filename in selected_files:
-        content = self.read_memory_file(filename)
+        content = read_memory_file(self, filename)
         if content:
             parts.append(content)
     parts.append("</relevant_memories>")
@@ -334,7 +334,7 @@ def write_memory_file(self, name: str, mem_type: str, desc: str, body: str):
     path.write_text(
         f"---\nname: {name}\ndescription: {desc}\ntype: {mem_type}\n---\n\nbody: {body}\n", encoding="utf-8"
     )
-    self._rebuild_index()
+    _rebuild_index(self)
     return path
 
 
@@ -420,7 +420,7 @@ def extract_memories(self, messages: list):
             desc = mem.get("description", "")
             body = mem.get("body", "")
             if desc and body:
-                self.write_memory_file(name, mem_type, desc, body)
+                write_memory_file(self, name, mem_type, desc, body)
                 count += 1
         if count:
             cli.inform_system_info(f"\n[Memory: 成功提取 {count} 条新记忆]")
@@ -481,7 +481,7 @@ def consolidate_memories(self):
         items = json.loads(match.group())
 
         # 移除旧的记忆文件（但保留 MEMORY.md）
-        for f in MEMORY_DIR.glob("*.md"):
+        for f in self.root.glob("*.md"):
             if f.name != "MEMORY.md":
                 f.unlink()
 
@@ -492,7 +492,7 @@ def consolidate_memories(self):
             desc = mem.get("description", "")
             body = mem.get("body", "")
             if desc and body:
-                write_memory_file(name, mem_type, desc, body)
+                write_memory_file(self, name, mem_type, desc, body)
 
         cli.inform_system_info(f"\n[Memory: 成功整理 {len(files)} → {len(items)} 条记忆]")
 

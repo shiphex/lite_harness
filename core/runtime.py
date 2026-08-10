@@ -165,7 +165,7 @@ class RuntimeFactory:
         )
 
         memory_root = (
-            workspace / ".agents" / "memory" / memory_policy.namespace
+            workspace / ".agents" / ".memory" / memory_policy.namespace
         )
 
         memory = MemoryManager(
