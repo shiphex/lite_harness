@@ -199,3 +199,19 @@ def test_update_context_uses_empty_memories_when_index_missing(monkeypatch, tmp_
         "workspace": str(tmp_path),
         "memories": "",
     }
+
+
+def test_update_context_prefers_explicit_runtime_memory_index(monkeypatch, tmp_path):
+    legacy_index = tmp_path / "legacy" / "MEMORY.md"
+    runtime_index = tmp_path / "runtime" / "MEMORY.md"
+    legacy_index.parent.mkdir()
+    runtime_index.parent.mkdir()
+    legacy_index.write_text("legacy memory", encoding="utf-8")
+    runtime_index.write_text("runtime memory", encoding="utf-8")
+    monkeypatch.setattr(load_prompt, "MEMORY_INDEX", legacy_index, raising=False)
+    monkeypatch.setattr(load_prompt, "WORKDIR", tmp_path, raising=False)
+    monkeypatch.setattr(load_prompt, "TOOLS_HANDLERS", {}, raising=False)
+
+    context = load_prompt.update_context({}, [], memory_index=runtime_index)
+
+    assert context["memories"] == "runtime memory"
