@@ -159,3 +159,14 @@ stateDiagram-v2
 
 
 
+# 5. Runtime
+用于记录 agent 实际运行环境的类：
+- agent: AgentDefinition 
+  - name: str
+  - agent_id: str
+- paths: RuntimePaths 当前 agent 的运行路径
+- hooks: HookManager 当前 agent 的 Hook 管理器
+- events: EventSink 当前 agent 的事件接收器
+- memory: MemoryManager 当前 agent 的内存管理器
+- prompt: PromptBuilder 当前 agent 的提示词构建器
+- tools: ToolExecutor 当前 agent 的工具执行器
