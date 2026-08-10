@@ -18,61 +18,63 @@ import tools
 import config
 from .loop import agent_loop
 from .loop import query_loop
+from .runtime import RunPolicy, state, RuntimeFactory
+from builtin.memory import MemoryPolicy, MemoryMode
 
 
-@dataclass()
-class RunPolicy():
-    """ 用于配置 queryLoop 循环的参数
 
-    所有的 Agent 共用的通用 queryLoop 循环结构，
-    通过配置 queryLoop 的 RunPolicy 中参数的不同
-    得到不同种类的 Agent，该参数在循环中不改变。
+def create_master_runtime(history: List, context: Dict):
+    """ 创建主 Agent 的运行时环境。
 
-    参数包括：
-    - max_turns: 最大循环次数
-    - prompt: 系统提示词、用户提示词（静态提示词）
-    - Model: 调用的模型
-    - fallbackModel: 失败时调用的模型
-    - CanUseTool: 可以使用的工具的列表
-    - CanAskUser: 是否可以询问用户问题
-    - Context: 上下文参数，用于存储会话中的记忆、系统状态等信息
+    Args:
+        None
+
+    Returns:
+        AgentRuntime: 主 Agent 的运行时环境。
     """
-    max_turns: int = 300
-    prompt: str = ""
-    model: Dict = field(default_factory=dict)
-    fallback_model: Dict = field(default_factory=dict)
-    tools_list: List = field(default_factory=list)
-    can_ask_user: bool = False
+        # 配置 queryLoop 循环的 RunPolicy
+    configured_model = dict(config.Config().get_model_config())
+    fallback_model = dict(configured_model)
+    fallback_model["model_name"] = (
+        configured_model.get("fallback_model_name")
+        or configured_model["model_name"]
+    )
+    content_config = config.Config().get_content_length()
+    agent_RunPolicy = RunPolicy(max_turns = 300,
+                                prompt = "",
+                                model = configured_model,
+                                fallback_model = fallback_model,
+                                tools_list = tools.TOOLS_LIST, 
+                                can_ask_user = True)
+            
+    # 初始化 queryLoop 循环的运行状态
+    agent_state = state(messages = history, 
+                                context = context, 
+                                max_output_tokens = content_config["MAIN_OUTPUT_TOKENS"],
+                                toolUse_prompt = "",
+                                turn_count = 0,
+                                transition = "", 
+                                max_output_tokens_override = False,
+                                recovery_count = 3, 
+                                has_attempted_reactive_compact = False,
+                                current_model = agent_RunPolicy.model,
+                                consecutive_529 = 0 )
 
+    memoryPolicy = MemoryPolicy(
+        mode = MemoryMode.READ_WRITE,
+        namespace = "master",
+    )
 
-@dataclass()
-class state():
-    """ 用于记录 queryLoop 循环的运行状态，该参数在循环中会改变。
-
-    一个 Agent 的运行状态通过 state 中的参数进行记录，
-    这些参数随着 queryLoop 循环的进行而改变。
-
-    参数包括：
-    - messages: 对话消息列表
-    - maxOutputTokens: 最大输出token数
-    - toolUsePrompt: 工具调用提示词（动态提示词）
-    - turnCount: 当前循环次数计数
-    - transition: 上次循环迭代的原因
-    - max_output_tokens_override: 是否覆盖最大输出token数
-    - recovery_count: 最大输出token数恢复次数
-    """
-    messages: List = field(default_factory=list)
-    context: Dict = field(default_factory=dict)
-    max_output_tokens: int = 4096
-    toolUse_prompt: str = ""
-    turn_count: int = 0
-    transition: str = ""
-    max_output_tokens_override: bool = False
-    recovery_count: int = 3
-    has_attempted_reactive_compact: bool = False
-    current_model: Dict = field(default_factory=dict)
-    consecutive_529: int = 0
-
+    runtime = RuntimeFactory.create(
+        agent_name = "Master Agent",
+        policy = agent_RunPolicy,
+        state = agent_state,
+        memory_policy = memoryPolicy,
+        workspace = config.Config().get_path_config("project_path"),
+        session_id = None,
+    )
+    
+    return runtime
 
 def master_agent():
     """ 主 Agent 的顶层入口 object.
@@ -96,6 +98,9 @@ def master_agent():
     history = []
     # 初始化上下文
     context = builtin.update_context({}, [])
+
+    runtime = create_master_runtime(history, context)
+
     while True:
         # 获取用户输入
         try:
@@ -108,43 +113,14 @@ def master_agent():
         # 执行 UserPromptSubmit hook
         hook.trigger_hooks("UserPromptSubmit", user_input)
 
-
         # 记录用户输入
         history.append({"role": "user", "content": user_input})
 
-        # 配置 queryLoop 循环的 RunPolicy
-        configured_model = dict(config.Config().get_model_config())
-        fallback_model = dict(configured_model)
-        fallback_model["model_name"] = (
-            configured_model.get("fallback_model_name")
-            or configured_model["model_name"]
-        )
-        content_config = config.Config().get_content_length()
-        agent_RunPolicy = asdict(RunPolicy(max_turns = 300,
-                                    prompt = "",
-                                    model = configured_model,
-                                    fallback_model = fallback_model,
-                                    tools_list = tools.TOOLS_LIST, 
-                                    can_ask_user = True))
-        
-        # 初始化 queryLoop 循环的运行状态
-        agent_state = asdict(state(messages = history, 
-                                    context = context, 
-                                    max_output_tokens = content_config["MAIN_OUTPUT_TOKENS"],
-                                    toolUse_prompt = "",
-                                    turn_count = 0,
-                                    transition = "", 
-                                    max_output_tokens_override = False,
-                                    recovery_count = 3, 
-                                    has_attempted_reactive_compact = False,
-                                    current_model = agent_RunPolicy["model"],
-                                    consecutive_529 = 0 ))
-
         # 执行 agent_loop 工作循环
-        agent_state, status = query_loop(agent_RunPolicy, agent_state)
+        agent_state, status = query_loop(runtime)
 
         # 更新上下文
-        history = agent_state.get("messages", history)
+        history = agent_state.messages
         context = builtin.update_context(context, history)
 
         # 执行系统输出

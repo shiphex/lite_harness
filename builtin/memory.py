@@ -14,18 +14,57 @@ import json
 import config
 import api
 import cli
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
 
 
-WORKDIR = config.Config().get_project_path()
-"""项目工作目录路径。"""
+class MemoryMode(str, Enum):
+    """ 记忆模式枚举类 """
+    OFF = "off"
+    READ_ONLY = "read_only"
+    READ_WRITE = "read_write"
 
-MEMORY_DIR = config.Config().get_path_config("memory_dir")
-"""记忆文件所在目录。"""
 
-MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+@dataclass(frozen=True)
+class MemoryPolicy:
+    mode: MemoryMode = MemoryMode.OFF
+    namespace: str = "default"
 
-MEMORY_INDEX = config.Config().get_path_config("memory_index")
-"""记忆索引文件路径。"""
+    @property
+    def can_read(self) -> bool:
+        """ 是否可以读取记忆文件 """
+        return self.mode in (
+            MemoryMode.READ_ONLY, 
+            MemoryMode.READ_WRITE
+        )
+
+    @property
+    def can_write(self) -> bool:
+        """ 是否可以写入记忆文件 """
+        return self.mode == MemoryMode.READ_WRITE
+
+
+class MemoryManager:
+    """ 记忆管理器类 """
+    def __init__(self, root: Path, policy: MemoryPolicy):
+        self.root = root
+        self.policy = policy
+        self.index_path = self.root / "MEMORY.md"
+
+        if self.policy.can_write:
+            self.index_path.mkdir(parents=True, exist_ok=True)
+
+    def load(self, messages: list) -> str:
+        return load_memories(self, messages = messages)
+
+    def extract(self, messages: list):
+        """ 从压缩前的快照中提取记忆 """
+        extract_memories(self, messages = messages)
+
+    def consolidate(self):
+        """ 合并记忆 """
+        consolidate_memories(self)
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -79,7 +118,7 @@ def extract_text(content) -> str:
 
 # ------------------------- 加载记忆 -------------------------
 
-def read_memory_file(filename: str) -> str | None:
+def read_memory_file(self, filename: str) -> str | None:
     """读取指定记忆文件的完整文本内容。
 
     Args:
@@ -88,13 +127,17 @@ def read_memory_file(filename: str) -> str | None:
     Returns:
         str | None: 文件存在时返回其 UTF-8 文本内容；文件不存在时返回 None。
     """
-    path = MEMORY_DIR / filename
+    if not self.policy.can_read:
+        return None
+
+    path = self.root / filename
+    
     if not path.exists():
         return None
     return path.read_text(encoding="utf-8")
 
 
-def list_memory_files() -> list[dict]:
+def list_memory_files(self) -> list[dict]:
     """列出可用的记忆文件及其元数据。
 
     扫描 MEMORY_DIR 下的 Markdown 文件，解析 YAML frontmatter，并返回
@@ -104,12 +147,17 @@ def list_memory_files() -> list[dict]:
         list[dict]: 记忆文件信息列表。每个元素包含 filename、name、
             description、type 和 body 字段。
     """
+    if not self.policy.can_read:
+        return []
+    
     result = []
-    for f in sorted(MEMORY_DIR.glob("*.md")):
-        if f.name == "Memory.md":
+    for f in sorted(self.root.glob("*.md")):
+        if f.name == "MEMORY.md":
             continue
+
         raw = f.read_text(encoding="utf-8")
         meta, body = _parse_frontmatter(raw)
+
         result.append({
             "filename": f.name,
             "name": meta.get("name", f.stem),   # .stem 是文件名去掉扩展名
@@ -120,7 +168,7 @@ def list_memory_files() -> list[dict]:
     return result
 
 
-def select_relevant_memories(messages: list, max_items: int = 5) -> list[str]:
+def select_relevant_memories(self, messages: list, max_items: int = 5) -> list[str]:
     """根据最近对话选择相关的记忆文件。
 
     优先调用 LLM 根据最近用户消息与记忆目录进行语义匹配；当 LLM 调用或
@@ -136,7 +184,7 @@ def select_relevant_memories(messages: list, max_items: int = 5) -> list[str]:
     # 加载全部的记忆文件
         # 为什么把加载记忆文件的代码放在这里？而不是在收集用户上下文信息后面？
         # 因为不存在记忆文件时，选择记忆文件就毫无意义，直接退出函数
-    files = list_memory_files()
+    files = list_memory_files(self)
     if not files:
         return []
 
@@ -220,7 +268,7 @@ def select_relevant_memories(messages: list, max_items: int = 5) -> list[str]:
     return selected
 
 
-def load_memories(messages: list) -> str:
+def load_memories(self, messages: list) -> str:
     """加载与当前会话相关的记忆内容。
 
     Args:
@@ -229,13 +277,16 @@ def load_memories(messages: list) -> str:
     Returns:
         str: 使用 <relevant_memories> 标签包裹的记忆文本；没有相关记忆时返回空字符串。
     """
-    selected_files = select_relevant_memories(messages)
+    if not self.policy.can_read:
+        return ""
+
+    selected_files = select_relevant_memories(self, messages)
     if not selected_files:
         return ""
 
     parts = ["<relevant_memories>"]
     for filename in selected_files:
-        content = read_memory_file(filename)
+        content = self.read_memory_file(filename)
         if content:
             parts.append(content)
     parts.append("</relevant_memories>")
@@ -244,14 +295,14 @@ def load_memories(messages: list) -> str:
 
 # ------------------------- 提取记忆 -------------------------
 
-def _rebuild_index():
+def _rebuild_index(self):
     """根据当前记忆文件重建记忆索引文件。
 
     遍历 MEMORY_DIR 下的记忆 Markdown 文件，提取名称和描述后写入
     MEMORY_INDEX（MEMORY.md 文件），供后续人工查看或系统检索。
     """
     lines = []
-    for f in sorted(MEMORY_DIR.glob("*.md")):
+    for f in sorted(self.root.glob("*.md")):
         if f.name == "MEMORY.md":
             continue
         raw = f.read_text(encoding="utf-8")
@@ -259,10 +310,10 @@ def _rebuild_index():
         name = meta.get("name", f.stem)
         desc = meta.get("description", body.split("\n")[0][:80])
         lines.append(f"- [{name}]({f.name}) - {desc}")
-    MEMORY_INDEX.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
+    self.index_path.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
 
 
-def write_memory_file(name: str, mem_type: str, desc: str, body: str):
+def write_memory_file(self, name: str, mem_type: str, desc: str, body: str):
     """写入单条记忆并刷新索引（使用 YAML 格式存储记忆文件）。
 
     Args:
@@ -274,17 +325,20 @@ def write_memory_file(name: str, mem_type: str, desc: str, body: str):
     Returns:
         pathlib.Path: 写入后的记忆文件路径。
     """
+    if not self.policy.can_write:
+        return None
+    
     slug = name.lower().replace(" ", "-").replace("'", "-")
-    filename = f"{slug}.md"
-    filepath = MEMORY_DIR / filename
-    filepath.write_text(
+    path = self.root / f"{slug}.md"
+
+    path.write_text(
         f"---\nname: {name}\ndescription: {desc}\ntype: {mem_type}\n---\n\nbody: {body}\n", encoding="utf-8"
     )
-    _rebuild_index()
-    return filepath
+    self._rebuild_index()
+    return path
 
 
-def extract_memories(messages: list):
+def extract_memories(self, messages: list):
     """从近期对话中提取新的长期记忆。
 
     将最近消息整理为对话文本，结合已有记忆摘要提示 LLM 提取新增记忆。
@@ -296,6 +350,9 @@ def extract_memories(messages: list):
     Returns:
         str | None: 对话为空时返回空字符串；其他情况下主要通过写入文件产生副作用。
     """
+    if not self.policy.can_write:
+        return ""
+
     dialogue_parts = []
     # 从最新的10条消息中提取对话内容
         # 问题：如果该轮对话的消息远多于10条，导致记忆提取丢失。
@@ -316,7 +373,7 @@ def extract_memories(messages: list):
         return ""
 
     # 检查已存在记忆文件避免重复记录
-    existing_files = list_memory_files()
+    existing_files = list_memory_files(self)
     existing_desc = "\n".join(f"- {m['name']} - {m['description']}" 
                               for m in existing_files) \
                               if existing_files else "(none)"
@@ -363,7 +420,7 @@ def extract_memories(messages: list):
             desc = mem.get("description", "")
             body = mem.get("body", "")
             if desc and body:
-                write_memory_file(name, mem_type, desc, body)
+                self.write_memory_file(name, mem_type, desc, body)
                 count += 1
         if count:
             cli.inform_system_info(f"\n[Memory: 成功提取 {count} 条新记忆]")
@@ -378,13 +435,16 @@ CONSOLIDATE_THRESHOLD = 10
 
 # 整理记忆文件
     # 合并重复/过期的内存。当文件数量≥阈值时触发。
-def consolidate_memories():
+def consolidate_memories(self):
     """整理并合并已有记忆文件。
 
     当记忆文件数量达到 CONSOLIDATE_THRESHOLD 后，调用 LLM 合并重复内容、
     删除过期或冲突信息，并用整理后的结果重写记忆文件集合。
     """
-    files = list_memory_files()
+    if not self.policy.can_write:
+        return ""
+
+    files = list_memory_files(self)
     if len(files) < CONSOLIDATE_THRESHOLD:
         return
 

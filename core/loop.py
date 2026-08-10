@@ -16,9 +16,10 @@ import builtin
 
 from api.adapter_factory import create_adapter
 from api.contract import ModelRequest, ModelResponse
+from .runtime import AgentRuntime
 
 
-def compact_pipeline(messages: list):
+def compact_pipeline(runtime: AgentRuntime):
     """ 执行压缩管线，压缩会话历史记录。
 
     Args:
@@ -28,20 +29,26 @@ def compact_pipeline(messages: list):
         pre_compress: 压缩前的会话历史记录快照。
         messages: 压缩后的会话历史记录列表。
     """
+
+    messages = runtime.state.messages
+    
     # 执行压缩管线前保存快照以便准确提取储存的记忆
     pre_compress = [m if isinstance(m, dict) else
                     {"role": m.get("role", ""), "content": m.get("content", "")}
                     for m in messages]
 
     # 执行压缩管线
-    messages[:] = tools.tool_result_budget(messages)      # L3 储存大的工具调用输出结果
-    messages[:] = tools.snip_compact(messages)            # L1 裁剪式压缩
-    messages[:] = tools.micro_compact(messages)           # L2旧工具输出结果占位符替换
+    messages[:] = tools.tool_result_budget(             # L3 储存大的工具调用输出结果
+        messages,
+        artifacts = runtime.artifacts,
+    )      
+    messages[:] = tools.snip_compact(messages)          # L1 裁剪式压缩
+    messages[:] = tools.micro_compact(messages)         # L2旧工具输出结果占位符替换
     # 若压缩后历史记录超过上下文大小，执行紧凑式压缩
     CONTEXT_LIMIT = 50000
     if tools.estimate_size(messages) > CONTEXT_LIMIT:
         print("[auto compact]")
-        messages[:] = tools.compact_history(messages)
+        messages[:] = tools.compact_history(messages, runtime.artifacts)
 
     return pre_compress, messages
 
@@ -92,7 +99,7 @@ def struct_massages(messages: list, memories_content: str):
     return request_messages
 
 
-def execute_tool(response: ModelResponse):
+def execute_tool(response: ModelResponse, runtime: AgentRuntime):
     """ 执行工具调用。
 
     Args:
@@ -101,6 +108,7 @@ def execute_tool(response: ModelResponse):
     Returns:
         list: 更新后的会话历史记录列表，包含工具调用结果。
     """
+    messages = runtime.state.messages
 
     # 初始化模型输出储存列表
     results = []
@@ -116,7 +124,7 @@ def execute_tool(response: ModelResponse):
 
         # 对调用了压缩工具进行处理
         if block.name == "compact":
-            messages[:] = tools.compact_history(messages)
+            messages[:] = tools.compact_history(messages, runtime.artifacts,)
             results.append({
                 "type": "tool_result",
                 "tool_use_id": block.id,
@@ -150,7 +158,7 @@ def execute_tool(response: ModelResponse):
     return results, status
 
 
-def query_loop(RunPolicy: dict, state: dict):
+def query_loop(runtime: AgentRuntime):
     """ queryLoop 循环 object.
 
     该循环负责调用模型接口，执行工具调用，保存模型输出。
@@ -169,26 +177,33 @@ def query_loop(RunPolicy: dict, state: dict):
     """
     
     # 0. 解析权限、状态参数
-    messages = state["messages"]
-    context = state["context"]
-    model = state["current_model"]
-    max_turns = RunPolicy.get("max_turns", 0)
-    tools = RunPolicy["tools_list"]
+    state = runtime.state
+    RunPolicy = runtime.policy
+
+    messages = state.messages
+    context = state.context
+    model = state.current_model
+    max_turns = RunPolicy.max_turns
+    tools = RunPolicy.tools_list
+
     # 1. 记忆提取、提示词加载
-    memories_content = builtin.load_memories(messages)
+    memories_content = runtime.memory.load(messages)
 
     while True:
         if max_turns > 0:
-            if state.get("turn_count", 0) >= max_turns:
-                state["messages"] = messages
+            if state.turn_count >= max_turns:
+                state.messages = messages
                 return state, {"reason": "max_turns"}
-            state["turn_count"] = state.get("turn_count", 0) + 1
+            state.turn_count = state.turn_count + 1
 
         context = builtin.update_context(context, messages)
         system = builtin.get_system_prompt(context)
 
         # 2. 执行压缩管线
-        pre_compress, messages = compact_pipeline(messages)
+        state.messages = messages
+        state.context = context
+        runtime.state = state
+        pre_compress, messages = compact_pipeline(runtime)
         
         # 3. 规范化请求消息构建
         request_messages = struct_massages(messages, memories_content)
@@ -202,7 +217,7 @@ def query_loop(RunPolicy: dict, state: dict):
                         tools = tools,
                         system_prompt = system,
                         messages = request_messages,
-                        max_tokens = state["max_output_tokens"],
+                        max_tokens = state.max_output_tokens,
                     )
                 ),
                 state,
@@ -211,27 +226,29 @@ def query_loop(RunPolicy: dict, state: dict):
         # 5. 错误恢复
         except Exception as e:
             if builtin.is_prompt_too_long_error(e):
-                if not state["has_attempted_reactive_compact"]:
+                if not state.has_attempted_reactive_compact:
                     print("\033[33m\n⚠ [重新执行压缩]\033[0m")
                     messages[:] = tools.reactive_compact(messages)
-                    state["has_attempted_reactive_compact"] = True
+                    state.has_attempted_reactive_compact = True
                     continue                # Continue Site 2: Prompt Too Long
                 print("  \033[31m[unrecoverable] 压缩后依然过长。\033[0m")
                 messages.append({"role": "assistant", "content": [
                     {"type": "text",
                      "text": "[Error] 上下文过大，无法继续。"}]})
-                state["messages"] = messages
+                state.messages = messages
+                state.context = context
                 return state, {"reason": "prompt_too_long"}
             raise
 
         # 若 model 回答的文本内容超过上下文大小，执行 output_tokens_too_long_error 函数
         if response.stop_reason == "max_tokens":
             state, messages = builtin.output_tokens_too_long_error(messages, state)
-            if state["recovery_count"] >= builtin.MAX_RECOVERY_RETRIES:
-                state["messages"] = messages
+            if state.recovery_count >= builtin.MAX_RECOVERY_RETRIES:
+                state.messages = messages
+                state.context = context
                 return state, {"reason": "prompt_too_long"}
-            if state["max_output_tokens_override"] and state["recovery_count"] < builtin.MAX_RECOVERY_RETRIES:
-                state["max_output_tokens"] = int(state["max_output_tokens"] * 2)
+            if state.max_output_tokens_override and state.recovery_count < builtin.MAX_RECOVERY_RETRIES:
+                state.max_output_tokens = int(state.max_output_tokens * 2)
                 continue            # Continue Site 3: Max Output Tokens
             continue
 
@@ -245,19 +262,23 @@ def query_loop(RunPolicy: dict, state: dict):
         # 判断模型返回消息中是否有工具调用
         if response.stop_reason != "tool_use":
             # 从压缩前的的快照中提取记忆
-            builtin.extract_memories(pre_compress)
-            builtin.consolidate_memories()
+            runtime.memory.extract(pre_compress)
+            runtime.memory.consolidate()
     
             # 触发 Stop hook
             force = hook.trigger_hooks("Stop", messages)
             if force:
                 messages.append({"role": "user", "content": force})
-            state["messages"] = messages
+            state.messages = messages
+            state.context = context
             return state, {"reason": "completed"}               # return Terminal — 唯一的退出点
 
         # 6. 收集 tool_use 块
         # 7. 执行工具调用
-        results, status = execute_tool(response)
+        state.messages = messages
+        state.context = context
+        runtime.state = state
+        results, status = execute_tool(response, runtime)
         if status == "compact":
             continue
         else:

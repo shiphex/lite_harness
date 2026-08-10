@@ -82,7 +82,7 @@ def with_llm_retry(fn, state, RunPolicy):
         # 尝试执行函数
         try:
             result = fn()
-            state["consecutive_529"] = 0
+            state.consecutive_529 = 0
             return result
         except Exception as e:
             name = type(e).__name__
