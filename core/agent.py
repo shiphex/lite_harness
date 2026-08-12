@@ -55,7 +55,7 @@ def create_master_runtime(history: List, context: Dict):
                                 turn_count = 0,
                                 transition = "", 
                                 max_output_tokens_override = False,
-                                recovery_count = 3, 
+                                recovery_count = 0,
                                 has_attempted_reactive_compact = False,
                                 current_model = agent_RunPolicy.model,
                                 consecutive_529 = 0 )

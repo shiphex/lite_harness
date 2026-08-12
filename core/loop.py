@@ -182,9 +182,8 @@ def query_loop(runtime: AgentRuntime):
 
     messages = state.messages
     context = state.context
-    model = state.current_model
     max_turns = RunPolicy.max_turns
-    tools = RunPolicy.tools_list
+    tool_defs = RunPolicy.tools_list
 
     # 1. 记忆提取、提示词加载
     memories_content = runtime.memory.load(runtime, messages)
@@ -197,6 +196,7 @@ def query_loop(runtime: AgentRuntime):
             state.turn_count = state.turn_count + 1
 
         system = runtime.prompt.build(runtime)
+        context = state.context
 
         # 2. 执行压缩管线
         state.messages = messages
@@ -210,10 +210,10 @@ def query_loop(runtime: AgentRuntime):
         # 4. 调用 LLM
         try: 
             response = builtin.with_llm_retry(
-                lambda: create_adapter(model).complete(
+                lambda: create_adapter(state.current_model).complete(
                     ModelRequest(
-                        model = model["model_name"],
-                        tools = tools,
+                        model = state.current_model["model_name"],
+                        tools = tool_defs,
                         system_prompt = system,
                         messages = request_messages,
                         max_tokens = state.max_output_tokens,

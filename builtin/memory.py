@@ -57,17 +57,20 @@ class MemoryManager:
 
         if self.policy.can_write:
             self.root.mkdir(parents=True, exist_ok=True)
+            if self.index_path.is_dir():
+                backup = self.root / f"MEMORY.md.legacy-dir-{time.time_ns()}"
+                self.index_path.rename(backup)
 
     def load(self, runtime, messages: list) -> str:
         return load_memories(self, runtime = runtime, messages = messages)
 
     def extract(self, runtime, messages: list):
         """ 从压缩前的快照中提取记忆 """
-        extract_memories(self, runtime = runtime, messages = messages)
+        return extract_memories(self, runtime = runtime, messages = messages)
 
     def consolidate(self, runtime):
         """ 合并记忆 """
-        consolidate_memories(self, runtime = runtime)
+        return consolidate_memories(self, runtime = runtime)
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -140,7 +143,13 @@ def read_memory_file(self, filename: str) -> str | None:
     if not self.policy.can_read:
         return None
 
-    path = self.root / filename
+    path = Path(filename)
+    root = self.root.resolve()
+    if path.is_absolute() or ".." in path.parts:
+        return None
+    path = (root / path).resolve()
+    if root not in path.parents:
+        return None
     
     if not path.is_file():
         return None
@@ -323,7 +332,10 @@ def _rebuild_index(self):
         name = meta.get("name", f.stem)
         desc = meta.get("description", body.split("\n")[0][:80])
         lines.append(f"- [{name}]({f.name}) - {desc}")
-    self.index_path.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
+    content = "\n".join(lines) + "\n" if lines else ""
+    temporary = self.root / f".MEMORY.md.tmp-{time.time_ns()}"
+    temporary.write_text(content, encoding="utf-8")
+    temporary.replace(self.index_path)
 
 
 def write_memory_file(self, name: str, mem_type: str, desc: str, body: str):
@@ -341,7 +353,9 @@ def write_memory_file(self, name: str, mem_type: str, desc: str, body: str):
     if not self.policy.can_write:
         return None
     
-    slug = name.lower().replace(" ", "-").replace("'", "-")
+    slug = re.sub(r"[^a-z0-9]+", "-", str(name).lower()).strip("-")
+    if not slug or slug == "memory":
+        slug = "memory-item"
     path = self.root / f"{slug}.md"
 
     path.write_text(
@@ -364,7 +378,7 @@ def extract_memories(self, runtime, messages: list):
         str | None: 对话为空时返回空字符串；其他情况下主要通过写入文件产生副作用。
     """
     if not self.policy.can_write:
-        return ""
+        return False
 
     dialogue_parts = []
     # 从最新的10条消息中提取对话内容
@@ -413,7 +427,7 @@ def extract_memories(self, runtime, messages: list):
             )
         text = extract_text(response.content).strip()
         if not text:
-            return
+            return False
         # 提取 JSON 文本段，使用“？”非贪婪匹配，排配第一个 JSON 文本段
             # 利用**正则表达式（Regular Expression）**在一段名为 text 的文本中，
             # 寻找并提取第一个被方括号 [...] 包裹的 JSON 文本段。
@@ -422,10 +436,10 @@ def extract_memories(self, runtime, messages: list):
         # 解析 JSON，排除空文本段
         if not match:
             cli.inform_system_info("\n[Memory: 提取失败] 模型未返回 JSON 数组")
-            return
+            return False
         items = json.loads(match.group())
         if not items:
-            return
+            return False
 
         count = 0
         for mem in items:
@@ -438,8 +452,11 @@ def extract_memories(self, runtime, messages: list):
                 count += 1
         if count:
             cli.inform_system_info(f"\n[Memory: 成功提取 {count} 条新记忆]")
+            return True
+        return False
     except Exception as e:
         cli.inform_system_info(f"\n[Memory: 提取失败] {e}")
+        return False
 
 
 # ------------------------- 整理记忆 -------------------------
@@ -456,11 +473,11 @@ def consolidate_memories(self, runtime):
     删除过期或冲突信息，并用整理后的结果重写记忆文件集合。
     """
     if not self.policy.can_write:
-        return ""
+        return False
 
     files = list_memory_files(self)
     if len(files) < CONSOLIDATE_THRESHOLD:
-        return
+        return False
 
     # 生成记忆目录(问题：只靠 \n\n 和 ## 来分隔不同记忆文件，可能会导致不同文件难以区分)
     catalog = "\n\n".join(
@@ -495,7 +512,7 @@ def consolidate_memories(self, runtime):
     
         # 解析 JSON，排除空文本段
         if not match:
-            return
+            return False
         items = json.loads(match.group())
 
         # 移除旧的记忆文件（但保留 MEMORY.md）
@@ -513,6 +530,8 @@ def consolidate_memories(self, runtime):
                 write_memory_file(self, name, mem_type, desc, body)
 
         cli.inform_system_info(f"\n[Memory: 成功整理 {len(files)} → {len(items)} 条记忆]")
+        return True
 
-    except Exception:
-        pass
+    except Exception as e:
+        cli.inform_system_info(f"\n[Memory: 整理失败] {e}")
+        return False

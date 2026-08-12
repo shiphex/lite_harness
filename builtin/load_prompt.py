@@ -41,7 +41,12 @@ class PromptBuilder:
               runtime, 
         ) -> str:
 
-        context = update_context(runtime.state.context, runtime.state.messages, memory_index = runtime.memory.index_path)
+        context = update_context(
+            runtime.state.context,
+            runtime.state.messages,
+            memory_index=runtime.memory.index_path,
+        )
+        runtime.state.context = context
         system_prompt = get_system_prompt(runtime, context)
 
         return system_prompt
@@ -166,7 +171,16 @@ def get_system_prompt(runtime, context: dict) -> str:
     # sort_keys=True: 字典的键强制按字母升序排序后输出 JSON。
     # ensure_ascii=False: 直接输出原始中文 / 特殊字符，不转义成 Unicode 转义字符。
     # default=str: 处理 JSON 原生不支持序列化的对象，如 None、datetime 等。
-    key = json.dumps(context, sort_keys = True, ensure_ascii = False, default = str)
+    runtime_key = {
+        "workspace": str(runtime.paths.workspace),
+        "tools": runtime.policy.tools_list,
+    }
+    key = json.dumps(
+        {"runtime": runtime_key, "context": context},
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
     if key == _last_context_key and _last_prompt:
         cli.put_agent_other_info("  \033[90m[cache init]系统提示词未变化\033[0m")
         return _last_prompt
