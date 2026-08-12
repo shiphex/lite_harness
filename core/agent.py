@@ -16,7 +16,6 @@ import hook
 import builtin
 import tools
 import config
-from .loop import agent_loop
 from .loop import query_loop
 from .runtime import RunPolicy, state, RuntimeFactory
 from builtin.memory import MemoryPolicy, MemoryMode
@@ -123,7 +122,7 @@ def master_agent():
 
         # 更新上下文
         history = agent_state.messages
-        context = builtin.update_context(context, history)
+        context = builtin.update_context(context, history, memory_index=runtime.memory.index_path)
 
         # 执行系统输出
         response = next(
@@ -182,7 +181,7 @@ def agent():
         history.append({"role": "user", "content": user_input})
 
         # 执行 agent_loop 工作循环
-        agent_loop(history, context)
+        # agent_loop(history, context)
 
         # 更新上下文
         context = builtin.update_context(context, history)

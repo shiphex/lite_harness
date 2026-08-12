@@ -196,12 +196,7 @@ def query_loop(runtime: AgentRuntime):
                 return state, {"reason": "max_turns"}
             state.turn_count = state.turn_count + 1
 
-        context = builtin.update_context(
-            context,
-            messages,
-            memory_index=runtime.memory.index_path,
-        )
-        system = builtin.get_system_prompt(context)
+        system = runtime.prompt.build(runtime)
 
         # 2. 执行压缩管线
         state.messages = messages

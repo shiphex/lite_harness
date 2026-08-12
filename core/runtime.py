@@ -8,6 +8,7 @@ from uuid import uuid4
 from builtin.memory import MemoryManager, MemoryPolicy
 from builtin.artifacts import ArtifactStore
 from tools.tool_handler import ToolExecutor
+from builtin.load_prompt import PromptBuilder
 
 
 @dataclass()
@@ -113,10 +114,6 @@ class HookManager:
     hooks: List = field(default_factory=list)
 
 
-@dataclass
-class PromptBuilder:
-    pass
- 
 
 @dataclass
 class AgentRuntime:
@@ -129,7 +126,7 @@ class AgentRuntime:
 
     paths: RuntimePaths
 
-    # prompt: PromptBuilder
+    prompt: PromptBuilder
     memory: MemoryManager
     artifacts: ArtifactStore
 
@@ -165,6 +162,8 @@ class RuntimeFactory:
             workspace / ".agents" / ".memory" / memory_policy.namespace
         )
 
+        prompt = PromptBuilder()
+
         memory = MemoryManager(
             root = memory_root,
             policy = memory_policy,
@@ -188,6 +187,7 @@ class RuntimeFactory:
             policy = policy,
             state = state,
             paths = paths,
+            prompt = prompt,
             memory = memory,
             artifacts = artifacts,
             tools = tools,
