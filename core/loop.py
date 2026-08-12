@@ -187,7 +187,7 @@ def query_loop(runtime: AgentRuntime):
     tools = RunPolicy.tools_list
 
     # 1. 记忆提取、提示词加载
-    memories_content = runtime.memory.load(messages)
+    memories_content = runtime.memory.load(runtime, messages)
 
     while True:
         if max_turns > 0:
@@ -261,8 +261,8 @@ def query_loop(runtime: AgentRuntime):
         # 判断模型返回消息中是否有工具调用
         if response.stop_reason != "tool_use":
             # 从压缩前的的快照中提取记忆
-            runtime.memory.extract(pre_compress)
-            runtime.memory.consolidate()
+            runtime.memory.extract(runtime, pre_compress)
+            runtime.memory.consolidate(runtime)
     
             # 触发 Stop hook
             force = hook.trigger_hooks("Stop", messages)

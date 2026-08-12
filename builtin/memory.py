@@ -20,7 +20,6 @@ from pathlib import Path
 
 from api.adapter_factory import create_adapter
 from api.contract import ModelRequest, ModelResponse
-from core.runtime import AgentRuntime
 
 
 class MemoryMode(str, Enum):
@@ -62,11 +61,11 @@ class MemoryManager:
     def load(self, runtime, messages: list) -> str:
         return load_memories(self, runtime = runtime, messages = messages)
 
-    def extract(self, runtime: AgentRuntime, messages: list):
+    def extract(self, runtime, messages: list):
         """ 从压缩前的快照中提取记忆 """
         extract_memories(self, runtime = runtime, messages = messages)
 
-    def consolidate(self, runtime: AgentRuntime):
+    def consolidate(self, runtime):
         """ 合并记忆 """
         consolidate_memories(self, runtime = runtime)
 
@@ -240,10 +239,10 @@ def select_relevant_memories(self, runtime, messages: list, max_items: int = 5) 
     )
     try:
         # 让 LLM 调用模型，获取记忆索引编号（JSON 数组格式）
-        response = create_adapter(runtime.state.model).complete(
+        response = create_adapter(runtime.policy.model).complete(
                         ModelRequest(
-                            model = runtime.state.model["model_name"],
-                            tools = runtime.policy.tools,
+                            model = runtime.policy.model["model_name"],
+                            tools = runtime.policy.tools_list,
                             messages = [{"role": "user", "content": prompt}],
                             max_tokens = config.Config().MINI_OUTPUT_TOKENS,
                         )
@@ -404,10 +403,10 @@ def extract_memories(self, runtime, messages: list):
     )
     try:
         # 让 LLM 调用模型，提取记忆内容
-        response = create_adapter(runtime.state.model).complete(
+        response = create_adapter(runtime.policy.model).complete(
                 ModelRequest(
-                    model = runtime.state.model["model_name"],
-                    tools = runtime.policy.tools,
+                    model = runtime.policy.model["model_name"],
+                    tools = runtime.policy.tools_list,
                     messages = [{"role": "user", "content": prompt}],
                     max_tokens = config.Config().MINI_OUTPUT_TOKENS,
                 )
@@ -450,7 +449,7 @@ CONSOLIDATE_THRESHOLD = 10
 
 # 整理记忆文件
     # 合并重复/过期的内存。当文件数量≥阈值时触发。
-def consolidate_memories(self, runtime: AgentRuntime):
+def consolidate_memories(self, runtime):
     """整理并合并已有记忆文件。
 
     当记忆文件数量达到 CONSOLIDATE_THRESHOLD 后，调用 LLM 合并重复内容、
@@ -480,10 +479,10 @@ def consolidate_memories(self, runtime: AgentRuntime):
         f"{catalog[:16000]}"
     )
     try:
-        response = create_adapter(runtime.state.model).complete(
+        response = create_adapter(runtime.policy.model).complete(
                 ModelRequest(
-                    model = runtime.state.model["model_name"],
-                    tools = runtime.policy.tools,
+                    model = runtime.policy.model["model_name"],
+                    tools = runtime.policy.tools_list,
                     messages = [{"role": "user", "content": prompt}],
                     max_tokens = config.Config().MINI_OUTPUT_TOKENS,
                 )
