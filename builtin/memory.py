@@ -13,9 +13,14 @@ import re
 import json
 import api
 import cli
+import config
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+
+from api.adapter_factory import create_adapter
+from api.contract import ModelRequest, ModelResponse
+from core.runtime import AgentRuntime
 
 
 class MemoryMode(str, Enum):
@@ -54,16 +59,16 @@ class MemoryManager:
         if self.policy.can_write:
             self.root.mkdir(parents=True, exist_ok=True)
 
-    def load(self, messages: list) -> str:
-        return load_memories(self, messages = messages)
+    def load(self, runtime, messages: list) -> str:
+        return load_memories(self, runtime = runtime, messages = messages)
 
-    def extract(self, messages: list):
+    def extract(self, runtime: AgentRuntime, messages: list):
         """ 从压缩前的快照中提取记忆 """
-        extract_memories(self, messages = messages)
+        extract_memories(self, runtime = runtime, messages = messages)
 
-    def consolidate(self):
+    def consolidate(self, runtime: AgentRuntime):
         """ 合并记忆 """
-        consolidate_memories(self)
+        consolidate_memories(self, runtime = runtime)
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -174,7 +179,7 @@ def list_memory_files(self) -> list[dict]:
     return result
 
 
-def select_relevant_memories(self, messages: list, max_items: int = 5) -> list[str]:
+def select_relevant_memories(self, runtime, messages: list, max_items: int = 5) -> list[str]:
     """根据最近对话选择相关的记忆文件。
 
     优先调用 LLM 根据最近用户消息与记忆目录进行语义匹配；当 LLM 调用或
@@ -235,10 +240,14 @@ def select_relevant_memories(self, messages: list, max_items: int = 5) -> list[s
     )
     try:
         # 让 LLM 调用模型，获取记忆索引编号（JSON 数组格式）
-        response = api.call_model(
-            messages = [{"role": "user", "content": prompt}],
-            model_pattern = "mini",
-        )
+        response = create_adapter(runtime.state.model).complete(
+                        ModelRequest(
+                            model = runtime.state.model["model_name"],
+                            tools = runtime.policy.tools,
+                            messages = [{"role": "user", "content": prompt}],
+                            max_tokens = config.Config().MINI_OUTPUT_TOKENS,
+                        )
+                    )
         text = extract_text(response.content).strip()
         # 提取 JSON 数组，使用“？”非贪婪匹配，排配第一个 JSON 数组
             # 利用**正则表达式（Regular Expression）**在一段名为 text 的文本中，
@@ -273,8 +282,7 @@ def select_relevant_memories(self, messages: list, max_items: int = 5) -> list[s
 
     return selected
 
-
-def load_memories(self, messages: list) -> str:
+def load_memories(self, runtime, messages: list) -> str:
     """加载与当前会话相关的记忆内容。
 
     Args:
@@ -286,7 +294,7 @@ def load_memories(self, messages: list) -> str:
     if not self.policy.can_read:
         return ""
 
-    selected_files = select_relevant_memories(self, messages)
+    selected_files = select_relevant_memories(self, runtime, messages)
     if not selected_files:
         return ""
 
@@ -344,7 +352,7 @@ def write_memory_file(self, name: str, mem_type: str, desc: str, body: str):
     return path
 
 
-def extract_memories(self, messages: list):
+def extract_memories(self, runtime, messages: list):
     """从近期对话中提取新的长期记忆。
 
     将最近消息整理为对话文本，结合已有记忆摘要提示 LLM 提取新增记忆。
@@ -396,10 +404,14 @@ def extract_memories(self, messages: list):
     )
     try:
         # 让 LLM 调用模型，提取记忆内容
-        response = api.call_model(
+        response = create_adapter(runtime.state.model).complete(
+                ModelRequest(
+                    model = runtime.state.model["model_name"],
+                    tools = runtime.policy.tools,
                     messages = [{"role": "user", "content": prompt}],
-                    model_pattern = "mini",
+                    max_tokens = config.Config().MINI_OUTPUT_TOKENS,
                 )
+            )
         text = extract_text(response.content).strip()
         if not text:
             return
@@ -438,7 +450,7 @@ CONSOLIDATE_THRESHOLD = 10
 
 # 整理记忆文件
     # 合并重复/过期的内存。当文件数量≥阈值时触发。
-def consolidate_memories(self):
+def consolidate_memories(self, runtime: AgentRuntime):
     """整理并合并已有记忆文件。
 
     当记忆文件数量达到 CONSOLIDATE_THRESHOLD 后，调用 LLM 合并重复内容、
@@ -468,10 +480,14 @@ def consolidate_memories(self):
         f"{catalog[:16000]}"
     )
     try:
-        response = api.call_model(
+        response = create_adapter(runtime.state.model).complete(
+                ModelRequest(
+                    model = runtime.state.model["model_name"],
+                    tools = runtime.policy.tools,
                     messages = [{"role": "user", "content": prompt}],
-                    model_pattern = "summary",
+                    max_tokens = config.Config().MINI_OUTPUT_TOKENS,
                 )
+            )
         text = extract_text(response.content).strip()
         # 提取 JSON 文本段，使用“？”非贪婪匹配，排配第一个 JSON 文本段
             # 利用**正则表达式（Regular Expression）**在一段名为 text 的文本中，
