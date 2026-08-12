@@ -1,22 +1,15 @@
-import sys
-import importlib
 from pathlib import Path
+from types import SimpleNamespace
 
-PROJECT_ROOT = Path(__file__).parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-agent = importlib.import_module("core.agent")
+from core import agent
+from core.runtime import state
 
 
-def test_master_agent_builds_policy_from_config(monkeypatch):
-    captured = {}
-    outputs = []
-
+def _config(tmp_path):
     class FakeConfig:
         def get_model_config(self):
             return {
-                "api": "openai",
+                "api": "fake",
                 "model_url": "http://configured.example",
                 "api_key": "configured-key",
                 "model_name": "configured-model",
@@ -26,41 +19,75 @@ def test_master_agent_builds_policy_from_config(monkeypatch):
         def get_content_length(self):
             return {"MAIN_OUTPUT_TOKENS": 1234}
 
-    def fake_query_loop(policy, state):
-        captured["policy"] = policy
-        captured["state"] = state
-        state["messages"].append({
+        def get_path_config(self, name):
+            assert name == "project_path"
+            return tmp_path
+
+    return FakeConfig
+
+
+def test_create_master_runtime_builds_policy_and_state(monkeypatch, tmp_path):
+    monkeypatch.setattr(agent.config, "Config", _config(tmp_path))
+    monkeypatch.setattr(agent.tools, "TOOLS_LIST", [{"name": "demo_tool"}])
+    monkeypatch.setattr(agent.tools, "TOOLS_HANDLERS", {"demo_tool": lambda: "ok"})
+
+    runtime = agent.create_master_runtime([], {})
+
+    assert runtime.policy.model["model_name"] == "configured-model"
+    assert runtime.policy.fallback_model["model_name"] == "fallback-model"
+    assert runtime.policy.tools_list == [{"name": "demo_tool"}]
+    assert runtime.state.current_model == runtime.policy.model
+    assert runtime.state.max_output_tokens == 1234
+    assert runtime.state.recovery_count == 0
+    assert runtime.paths.workspace == tmp_path
+
+
+def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_path):
+    runtime = SimpleNamespace(
+        state=state(
+            messages=[],
+            context={},
+            turn_count=17,
+            current_model={"model_name": "model"},
+        ),
+        memory=SimpleNamespace(index_path=tmp_path / "MEMORY.md"),
+    )
+    captured = {}
+    outputs = []
+    context_updates = []
+
+    def fake_query_loop(current_runtime):
+        captured["runtime"] = current_runtime
+        assert current_runtime.state.turn_count == 0
+        current_runtime.state.messages.append({
             "role": "assistant",
             "content": [{"type": "text", "text": "done"}],
         })
-        return state, {"reason": "completed"}
+        return current_runtime.state, {"reason": "completed"}
 
     inputs = iter(["hello", "q"])
-    monkeypatch.setattr(agent.config, "Config", FakeConfig)
+    def fake_create_runtime(history, context):
+        runtime.state.messages = history
+        runtime.state.context = context
+        return runtime
+
+    monkeypatch.setattr(agent, "create_master_runtime", fake_create_runtime)
+    monkeypatch.setattr(agent, "query_loop", fake_query_loop)
     monkeypatch.setattr(agent.cli, "get_user_input", lambda: next(inputs))
     monkeypatch.setattr(agent.cli, "inform_system_info", lambda message: None)
     monkeypatch.setattr(agent.cli, "put_agent_output", outputs.append)
     monkeypatch.setattr(agent.cli, "put_agent_other_info", lambda message: None)
     monkeypatch.setattr(agent.hook, "trigger_hooks", lambda *args: None)
-    monkeypatch.setattr(agent.builtin, "update_context", lambda context, messages: context)
-    monkeypatch.setattr(agent.tools, "TOOLS_LIST", [])
-    monkeypatch.setattr(agent, "query_loop", fake_query_loop)
+    monkeypatch.setattr(
+        agent.builtin,
+        "update_context",
+        lambda context, messages, **kwargs: context_updates.append((context, messages, kwargs)) or context,
+    )
 
     agent.master_agent()
 
-    assert captured["policy"]["model"] == {
-        "api": "openai",
-        "model_url": "http://configured.example",
-        "api_key": "configured-key",
-        "model_name": "configured-model",
-        "fallback_model_name": "fallback-model",
-    }
-    assert captured["policy"]["fallback_model"] == {
-        "api": "openai",
-        "model_url": "http://configured.example",
-        "api_key": "configured-key",
-        "model_name": "fallback-model",
-        "fallback_model_name": "fallback-model",
-    }
-    assert captured["state"]["max_output_tokens"] == 1234
+    assert captured["runtime"] is runtime
     assert outputs == ["done"]
+    assert runtime.state.messages[0] == {"role": "user", "content": "hello"}
+    assert len(context_updates) == 2
+    assert context_updates[-1][2]["memory_index"] == runtime.memory.index_path

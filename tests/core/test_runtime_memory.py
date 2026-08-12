@@ -1,61 +1,83 @@
-from types import SimpleNamespace
-
-from api.contract import ModelResponse
 from builtin.artifacts import ArtifactStore
-from builtin.memory import MemoryManager, MemoryMode, MemoryPolicy
+from builtin.load_prompt import PromptBuilder
+from builtin.memory import MemoryMode, MemoryPolicy, write_memory_file
 from core import loop
-from core.runtime import AgentRuntime, RunPolicy, RuntimePaths, state
+from core.runtime import AgentRuntime, RunPolicy, RuntimeFactory, RuntimePaths, state
+from tools.tool_handler import ToolExecutor
 
 
-def test_query_loop_uses_runtime_memory_index_for_prompt_context(tmp_path, monkeypatch):
-    paths = RuntimePaths.create(tmp_path, "session", "agent")
-    memory = MemoryManager(
-        tmp_path / ".agents" / "memory" / "runtime",
-        MemoryPolicy(mode=MemoryMode.READ_WRITE, namespace="runtime"),
+def _policy():
+    return RunPolicy(
+        max_turns=1,
+        model={"api": "fake", "model_name": "model"},
+        tools_list=[{"name": "demo_tool"}],
+        tool_handler={"demo_tool": lambda: "ok"},
     )
-    memory._write_memory_file(
-        name="project",
-        mem_type="project",
-        desc="Project facts",
-        body="Runtime memory body",
-    )
-    runtime = AgentRuntime(
-        session_id="session",
+
+
+def test_runtime_factory_wires_isolated_paths_and_components(tmp_path):
+    runtime = RuntimeFactory.create(
         agent_name="agent",
-        agent_id="agent",
-        policy=RunPolicy(
-            max_turns=1,
-            model={"model_name": "model"},
-            tools_list=[],
-        ),
+        policy=_policy(),
         state=state(
             messages=[{"role": "user", "content": "hello"}],
-            current_model={"model_name": "model"},
+            current_model={"api": "fake", "model_name": "model"},
         ),
-        paths=paths,
-        memory=memory,
-        artifacts=ArtifactStore(paths.tool_result_dir, paths.transcript_dir),
+        memory_policy=MemoryPolicy(
+            mode=MemoryMode.READ_WRITE,
+            namespace="runtime",
+        ),
+        workspace=tmp_path,
+        session_id="session",
+    )
+
+    assert runtime.paths.workspace == tmp_path
+    assert runtime.paths.session_dir == tmp_path / ".agents" / "runs" / "session"
+    assert runtime.paths.agent_dir.is_dir()
+    assert runtime.memory.root == tmp_path / ".agents" / ".memory" / "runtime"
+    assert runtime.artifacts.tool_result_dir == runtime.paths.tool_result_dir
+    assert runtime.artifacts.transcript_dir == runtime.paths.transcript_dir
+    assert isinstance(runtime.prompt, PromptBuilder)
+    assert isinstance(runtime.tools, ToolExecutor)
+    assert runtime.tools.allowed_tools == {"demo_tool"}
+
+
+def test_prompt_builder_uses_runtime_memory_index_and_updates_context(tmp_path, monkeypatch):
+    runtime = RuntimeFactory.create(
+        agent_name="agent",
+        policy=_policy(),
+        state=state(
+            messages=[{"role": "user", "content": "project"}],
+            current_model={"api": "fake", "model_name": "model"},
+        ),
+        memory_policy=MemoryPolicy(
+            mode=MemoryMode.READ_WRITE,
+            namespace="runtime",
+        ),
+        workspace=tmp_path,
+        session_id="session",
+    )
+    write_memory_file(
+        runtime.memory,
+        "project",
+        "project",
+        "Project facts",
+        "Runtime memory body",
     )
     captured = {}
 
-    monkeypatch.setattr(runtime.memory, "load", lambda messages: "")
-    monkeypatch.setattr(runtime.memory, "extract", lambda messages: False)
-    monkeypatch.setattr(runtime.memory, "consolidate", lambda: False)
-    monkeypatch.setattr(loop, "compact_pipeline", lambda value: (value.state.messages.copy(), value.state.messages))
-    monkeypatch.setattr(loop, "struct_massages", lambda messages, memories: messages)
-    def capture_prompt(context):
+    def capture_prompt(current_runtime, context):
         captured["context"] = context
         return "system"
 
-    monkeypatch.setattr(loop.builtin, "get_system_prompt", capture_prompt)
-    monkeypatch.setattr(loop.builtin, "with_llm_retry", lambda fn, state, policy: fn())
-    monkeypatch.setattr(loop, "create_adapter", lambda model: SimpleNamespace(
-        complete=lambda request: ModelResponse(stop_reason="end_turn", content=[])
-    ))
-    monkeypatch.setattr(loop.hook, "trigger_hooks", lambda *args: None)
+    monkeypatch.setattr("builtin.load_prompt.get_system_prompt", capture_prompt)
 
-    loop.query_loop(runtime)
+    prompt = runtime.prompt.build(runtime)
 
+    assert prompt == "system"
     assert captured["context"]["memories"] == (
+        "- [project](project.md) - Project facts"
+    )
+    assert runtime.state.context["memories"] == (
         "- [project](project.md) - Project facts"
     )

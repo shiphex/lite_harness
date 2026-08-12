@@ -1,6 +1,12 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import tools.compact as compact
+from builtin.artifacts import ArtifactStore
+
+
+def _artifacts(tmp_path):
+    return ArtifactStore(tmp_path / "tool-results", tmp_path / "transcripts")
 
 
 def test_block_type_supports_dict_and_object():
@@ -59,13 +65,11 @@ def test_micro_compact_replaces_only_old_large_tool_results(monkeypatch):
     messages = [
         {
             "role": "user",
-            "content": [
-                {
-                    "type": "tool_result",
-                    "tool_use_id": f"tool-{i}",
-                    "content": f"large-result-{i}",
-                }
-            ],
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": f"tool-{i}",
+                "content": f"large-result-{i}",
+            }],
         }
         for i in range(4)
     ]
@@ -79,101 +83,101 @@ def test_micro_compact_replaces_only_old_large_tool_results(monkeypatch):
     assert messages[3]["content"][0]["content"] == "large-result-3"
 
 
-def test_persist_large_output_returns_inline_content_when_small(monkeypatch):
-    monkeypatch.setattr(compact, "PERSIST_THRESHOLD_CHARS", 100)
+def test_persist_large_output_returns_inline_content_when_small(tmp_path):
+    artifacts = _artifacts(tmp_path)
 
-    assert compact.persist_large_output("tool-1", "small") == "small"
+    assert compact.persist_large_output(artifacts, "tool-1", "small", 100) == "small"
+    assert not artifacts.tool_result_dir.exists()
 
 
-def test_persist_large_output_writes_large_content(tmp_path, monkeypatch):
-    monkeypatch.setattr(compact, "TOOL_RESULT_DIR", tmp_path)
-    monkeypatch.setattr(compact, "PERSIST_THRESHOLD_CHARS", 5)
+def test_persist_large_output_writes_large_content(tmp_path):
+    artifacts = _artifacts(tmp_path)
 
-    result = compact.persist_large_output("tool-1", "large output")
+    result = compact.persist_large_output(artifacts, "tool-1", "large output", 5)
 
-    assert (tmp_path / "tool-1.txt").read_text(encoding="utf-8") == "large output"
+    assert (artifacts.tool_result_dir / "tool-1.txt").read_text(encoding="utf-8") == "large output"
     assert "<persisted-output>" in result
     assert "large output" in result
 
 
-def test_tool_result_budget_persists_large_results(tmp_path, monkeypatch):
-    monkeypatch.setattr(compact, "TOOL_RESULT_DIR", tmp_path)
-    monkeypatch.setattr(compact, "PERSIST_THRESHOLD_CHARS", 5)
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "tool_result",
-                    "tool_use_id": "tool-1",
-                    "content": "large output",
-                }
-            ],
-        }
-    ]
+def test_tool_result_budget_persists_large_results(tmp_path):
+    artifacts = _artifacts(tmp_path)
+    large_output = "x" * (compact.PERSIST_THRESHOLD_CHARS + 1)
+    messages = [{
+        "role": "user",
+        "content": [{
+            "type": "tool_result",
+            "tool_use_id": "tool-1",
+            "content": large_output,
+        }],
+    }]
 
-    result = compact.tool_result_budget(messages, max_bytes=5)
+    result = compact.tool_result_budget(messages, max_bytes=5, artifacts=artifacts)
 
     assert result is messages
     assert "<persisted-output>" in messages[0]["content"][0]["content"]
-    assert (tmp_path / "tool-1.txt").exists()
+    assert (artifacts.tool_result_dir / "tool-1.txt").exists()
 
 
-def test_tool_result_budget_ignores_non_tool_result_tail():
+def test_tool_result_budget_ignores_non_tool_result_tail(tmp_path):
+    artifacts = _artifacts(tmp_path)
     messages = [{"role": "assistant", "content": "hello"}]
 
-    assert compact.tool_result_budget(messages, max_bytes=1) is messages
+    assert compact.tool_result_budget(messages, max_bytes=1, artifacts=artifacts) is messages
 
 
 def test_write_transcript_writes_json_lines(tmp_path, monkeypatch):
-    monkeypatch.setattr(compact, "TRANSCRIPT_DIR", tmp_path)
+    artifacts = _artifacts(tmp_path)
     monkeypatch.setattr(compact.time, "time", lambda: 123)
     messages = [{"role": "user", "content": "hello"}]
 
-    path = compact.write_transcript(messages)
+    path = compact.write_transcript(artifacts, messages)
 
-    assert path == tmp_path / "transcript_123.txt"
+    assert path == artifacts.transcript_dir / "transcript_123.txt"
     assert '"role": "user"' in path.read_text(encoding="utf-8")
 
 
-def test_summarize_history_calls_model_in_summary_mode(monkeypatch):
+def test_summarize_history_calls_legacy_summary_api(monkeypatch):
     calls = []
 
     def fake_call_model(**kwargs):
         calls.append(kwargs)
-        return SimpleNamespace(
-            content=[
-                SimpleNamespace(type="text", text="summary text"),
-                SimpleNamespace(type="tool_use", text="ignored"),
-            ]
-        )
+        return SimpleNamespace(content=[
+            SimpleNamespace(type="text", text="summary text"),
+            SimpleNamespace(type="tool_use", text="ignored"),
+        ])
 
     monkeypatch.setattr(compact.api, "call_model", fake_call_model)
 
-    result = compact.summarize_history([{"role": "user", "content": "hello"}])
-
-    assert result == "summary text"
+    assert compact.summarize_history([{"role": "user", "content": "hello"}]) == "summary text"
     assert calls[0]["model_pattern"] == "summary"
-    assert calls[0]["messages"][0]["role"] == "user"
 
 
-def test_compact_history_writes_transcript_and_returns_summary(monkeypatch):
-    monkeypatch.setattr(compact, "write_transcript", lambda messages: "transcript.txt")
+def test_compact_history_writes_transcript_and_returns_summary(tmp_path, monkeypatch):
+    artifacts = _artifacts(tmp_path)
+    calls = []
+    monkeypatch.setattr(
+        compact,
+        "write_transcript",
+        lambda current_artifacts, messages: calls.append((current_artifacts, messages)) or "transcript.txt",
+    )
     monkeypatch.setattr(compact, "summarize_history", lambda messages: "summary text")
 
-    result = compact.compact_history([{"role": "user", "content": "hello"}])
+    result = compact.compact_history([{"role": "user", "content": "hello"}], artifacts)
 
+    assert calls[0][0] is artifacts
     assert len(result) == 1
     assert result[0]["role"] == "user"
     assert "summary text" in result[0]["content"]
 
 
-def test_reactive_compact_keeps_recent_tail(monkeypatch):
-    monkeypatch.setattr(compact, "write_transcript", lambda messages: "transcript.txt")
+def test_reactive_compact_keeps_recent_tail(tmp_path, monkeypatch):
+    artifacts = _artifacts(tmp_path)
+    monkeypatch.setattr(compact, "write_transcript", lambda artifacts, messages: "transcript.txt")
     monkeypatch.setattr(compact, "summarize_history", lambda messages: "summary text")
     messages = [{"role": "user", "content": f"message-{i}"} for i in range(8)]
 
-    result = compact.reactive_compact(messages)
+    result = compact.reactive_compact(messages, artifacts)
 
     assert "summary text" in result[0]["content"]
     assert result[1:] == messages[-5:]

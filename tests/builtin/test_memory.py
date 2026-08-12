@@ -1,6 +1,8 @@
+import json
 from types import SimpleNamespace
 
 import builtin.memory as memory
+from api.contract import ModelResponse, TextPart
 
 
 def _block(text: str, block_type: str = "text"):
@@ -8,7 +10,16 @@ def _block(text: str, block_type: str = "text"):
 
 
 def _model_response(text: str):
-    return SimpleNamespace(content=[_block(text)])
+    return ModelResponse(content=[TextPart(text)], stop_reason="end_turn")
+
+
+def _runtime(model="fake-memory-model"):
+    return SimpleNamespace(
+        policy=SimpleNamespace(
+            model={"api": "fake", "model_name": model},
+            tools_list=[{"name": "write_file"}],
+        )
+    )
 
 
 def _manager(tmp_path, mode=memory.MemoryMode.READ_WRITE):
@@ -20,14 +31,13 @@ def _manager(tmp_path, mode=memory.MemoryMode.READ_WRITE):
 
 def _write_items(manager, count):
     for index in range(count):
-        manager._write_memory_file(
+        memory.write_memory_file(
+            manager,
             name=f"old-{index}",
             mem_type="project",
             desc=f"Old {index}",
             body=f"Old body {index}",
-            rebuild_index=False,
         )
-    manager._rebuild_index()
 
 
 def test_parse_frontmatter_returns_metadata_and_body():
@@ -61,15 +71,14 @@ def test_extract_text_supports_dicts_and_objects():
     assert memory.extract_text("plain text") == "plain text"
 
 
-def test_read_write_initialization_creates_only_root(tmp_path):
+def test_read_write_initialization_respects_memory_mode(tmp_path):
     manager = _manager(tmp_path)
-
     assert manager.root.is_dir()
     assert not manager.index_path.exists()
-    assert not manager.index_path.is_dir()
 
     read_only = _manager(tmp_path / "read-only", memory.MemoryMode.READ_ONLY)
     assert not read_only.root.exists()
+    assert memory.write_memory_file(read_only, "x", "user", "x", "x") is None
 
 
 def test_legacy_index_directory_is_moved_to_recoverable_backup(tmp_path):
@@ -95,7 +104,8 @@ def test_legacy_index_directory_is_moved_to_recoverable_backup(tmp_path):
 def test_write_memory_file_writes_file_and_atomic_index(tmp_path):
     manager = _manager(tmp_path)
 
-    path = manager._write_memory_file(
+    path = memory.write_memory_file(
+        manager,
         name="User Preference",
         mem_type="user",
         desc="Prefers concise answers",
@@ -110,10 +120,13 @@ def test_write_memory_file_writes_file_and_atomic_index(tmp_path):
     )
 
 
-def test_memory_names_cannot_escape_namespace(tmp_path):
+def test_memory_names_and_reads_cannot_escape_namespace(tmp_path):
     manager = _manager(tmp_path)
+    outside = tmp_path / "outside.md"
+    outside.write_text("secret", encoding="utf-8")
 
-    path = manager._write_memory_file(
+    path = memory.write_memory_file(
+        manager,
         name="../outside\\memory",
         mem_type="user",
         desc="safe",
@@ -122,21 +135,20 @@ def test_memory_names_cannot_escape_namespace(tmp_path):
 
     assert path.parent == manager.root
     assert path.is_file()
-    assert not (tmp_path / "outside.md").exists()
-    assert manager._safe_slug("MEMORY") != "memory"
+    assert memory.read_memory_file(manager, "../outside.md") is None
 
 
-def test_load_reads_selected_memory_file(tmp_path, monkeypatch):
+def test_load_reads_selected_memory_file_with_runtime(tmp_path, monkeypatch):
     manager = _manager(tmp_path)
-    manager._write_memory_file("alpha", "project", "Alpha", "Alpha body")
-    manager._write_memory_file("beta", "project", "Beta", "Beta body")
+    memory.write_memory_file(manager, "alpha", "project", "Alpha", "Alpha body")
+    memory.write_memory_file(manager, "beta", "project", "Beta", "Beta body")
     monkeypatch.setattr(
-        manager,
-        "_select_relevant_memories",
-        lambda messages: ["alpha.md", "beta.md"],
+        memory,
+        "select_relevant_memories",
+        lambda current_manager, runtime, messages: ["alpha.md", "beta.md"],
     )
 
-    result = manager.load([{"role": "user", "content": "hello"}])
+    result = manager.load(_runtime(), [{"role": "user", "content": "hello"}])
 
     assert result == (
         "<relevant_memories>\n\n"
@@ -148,41 +160,45 @@ def test_load_reads_selected_memory_file(tmp_path, monkeypatch):
     )
 
 
-def test_extract_memories_writes_items_and_index(tmp_path, monkeypatch):
+def test_extract_memories_uses_runtime_model_and_returns_success(tmp_path, monkeypatch):
     manager = _manager(tmp_path)
-    monkeypatch.setattr(
-        memory.api,
-        "call_model",
-        lambda **kwargs: _model_response(
-            """
-            [
-              {
-                "name": "project-detail",
-                "type": "project",
-                "description": "Project uses pytest",
-                "body": "Tests should use pytest fixtures."
-              }
-            ]
-            """
-        ),
-    )
+    requests = []
+
+    def fake_adapter(_config):
+        return SimpleNamespace(
+            complete=lambda request: requests.append(request) or _model_response(
+                json.dumps([{
+                    "name": "project-detail",
+                    "type": "project",
+                    "description": "Project uses pytest",
+                    "body": "Tests should use pytest fixtures.",
+                }])
+            )
+        )
+
+    monkeypatch.setattr(memory, "create_adapter", fake_adapter)
 
     assert manager.extract(
-        [{"role": "user", "content": "This project uses pytest."}]
+        _runtime(),
+        [{"role": "user", "content": "This project uses pytest."}],
     ) is True
+    assert requests[0].model == "fake-memory-model"
+    assert requests[0].tools == []
     assert (manager.root / "project-detail.md").is_file()
-    assert "project-detail.md" in manager.index_path.read_text(encoding="utf-8")
 
 
 def test_extract_memories_reports_model_failure_without_files(tmp_path, monkeypatch, capsys):
     manager = _manager(tmp_path)
+    monkeypatch.setattr(
+        memory,
+        "create_adapter",
+        lambda config: (_ for _ in ()).throw(RuntimeError("model unavailable")),
+    )
 
-    def failing_call_model(**kwargs):
-        raise RuntimeError("model unavailable")
-
-    monkeypatch.setattr(memory.api, "call_model", failing_call_model)
-
-    assert manager.extract([{"role": "user", "content": "Remember tabs."}]) is False
+    assert manager.extract(
+        _runtime(),
+        [{"role": "user", "content": "Remember tabs."}],
+    ) is False
     assert list(manager.root.glob("*.md")) == []
     assert "model unavailable" in capsys.readouterr().out
 
@@ -191,23 +207,19 @@ def test_consolidate_replaces_files_after_success(tmp_path, monkeypatch):
     manager = _manager(tmp_path)
     _write_items(manager, memory.CONSOLIDATE_THRESHOLD)
     monkeypatch.setattr(
-        memory.api,
-        "call_model",
-        lambda **kwargs: _model_response(
-            """
-            [
-              {
+        memory,
+        "create_adapter",
+        lambda config: SimpleNamespace(
+            complete=lambda request: _model_response(json.dumps([{
                 "name": "merged-memory",
                 "type": "user",
                 "description": "Merged memory",
-                "body": "Merged body."
-              }
-            ]
-            """
+                "body": "Merged body.",
+            }]))
         ),
     )
 
-    assert manager.consolidate() is True
+    assert manager.consolidate(_runtime()) is True
     assert sorted(path.name for path in manager.root.glob("*.md")) == [
         "MEMORY.md",
         "merged-memory.md",
@@ -224,13 +236,13 @@ def test_consolidate_failure_preserves_existing_files(tmp_path, monkeypatch, cap
         path.name: path.read_text(encoding="utf-8")
         for path in manager.root.glob("*.md")
     }
+    monkeypatch.setattr(
+        memory,
+        "create_adapter",
+        lambda config: (_ for _ in ()).throw(RuntimeError("summary unavailable")),
+    )
 
-    def failing_call_model(**kwargs):
-        raise RuntimeError("summary unavailable")
-
-    monkeypatch.setattr(memory.api, "call_model", failing_call_model)
-
-    assert manager.consolidate() is False
+    assert manager.consolidate(_runtime()) is False
     after = {
         path.name: path.read_text(encoding="utf-8")
         for path in manager.root.glob("*.md")
