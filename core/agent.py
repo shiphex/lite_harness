@@ -117,6 +117,7 @@ def master_agent():
         history.append({"role": "user", "content": user_input})
 
         # 执行 agent_loop 工作循环
+        runtime.state.turn_count = 0
         agent_state, status = query_loop(runtime)
 
         # 更新上下文
