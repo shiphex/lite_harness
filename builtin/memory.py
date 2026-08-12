@@ -242,7 +242,7 @@ def select_relevant_memories(self, runtime, messages: list, max_items: int = 5) 
         response = create_adapter(runtime.policy.model).complete(
                         ModelRequest(
                             model = runtime.policy.model["model_name"],
-                            tools = runtime.policy.tools_list,
+                            tools = [],
                             messages = [{"role": "user", "content": prompt}],
                             max_tokens = config.Config().MINI_OUTPUT_TOKENS,
                         )
@@ -406,7 +406,7 @@ def extract_memories(self, runtime, messages: list):
         response = create_adapter(runtime.policy.model).complete(
                 ModelRequest(
                     model = runtime.policy.model["model_name"],
-                    tools = runtime.policy.tools_list,
+                    tools = [],
                     messages = [{"role": "user", "content": prompt}],
                     max_tokens = config.Config().MINI_OUTPUT_TOKENS,
                 )
@@ -482,7 +482,7 @@ def consolidate_memories(self, runtime):
         response = create_adapter(runtime.policy.model).complete(
                 ModelRequest(
                     model = runtime.policy.model["model_name"],
-                    tools = runtime.policy.tools_list,
+                    tools = [],
                     messages = [{"role": "user", "content": prompt}],
                     max_tokens = config.Config().MINI_OUTPUT_TOKENS,
                 )
