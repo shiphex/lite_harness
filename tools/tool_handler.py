@@ -13,6 +13,24 @@ from .subagent import spawn_subagent
 from .load_skill import load_skill
 
 
+
+class ToolExecutor:
+    def __init__(self, registry: dict, allowed_tools: list, workspace):
+        self.registry = registry
+        self.allowed_tools = {
+            tool["name"] for tool in allowed_tools
+        }
+        self.workspace = workspace
+
+    def execute(self, name: str, args: dict):
+        if name not in self.allowed_tools:
+            raise PermissionError(f"Tool not allowed: {name}")
+
+        handler = self.registry.get(name)
+        return handler(**args) if handler else f"Unknown: {name}"
+       
+
+
 # 初级工具列表
 STANDARD_TOOLS_LIST = [
     {"name": "powershell", "description": "执行一个 PowerShell 命令。",

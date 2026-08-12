@@ -45,6 +45,7 @@ def create_master_runtime(history: List, context: Dict):
                                 model = configured_model,
                                 fallback_model = fallback_model,
                                 tools_list = tools.TOOLS_LIST, 
+                                tool_handler = tools.TOOLS_HANDLERS,
                                 can_ask_user = True)
             
     # 初始化 queryLoop 循环的运行状态

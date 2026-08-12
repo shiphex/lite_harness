@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from builtin.memory import MemoryManager, MemoryPolicy
 from builtin.artifacts import ArtifactStore
+from tools.tool_handler import ToolExecutor
 
 
 @dataclass()
@@ -30,6 +31,7 @@ class RunPolicy():
     model: Dict = field(default_factory=dict)
     fallback_model: Dict = field(default_factory=dict)
     tools_list: List = field(default_factory=list)
+    tool_handler: Dict = field(default_factory=dict)
     can_ask_user: bool = False
 
 
@@ -114,12 +116,7 @@ class HookManager:
 @dataclass
 class PromptBuilder:
     pass
-
-
-@dataclass
-class ToolExecutor:
-    pass
-
+ 
 
 @dataclass
 class AgentRuntime:
@@ -138,7 +135,7 @@ class AgentRuntime:
 
     # hooks: HookManager
     # events: EventSink
-    # tools: ToolExecutor
+    tools: ToolExecutor
 
 
 @dataclass
@@ -177,6 +174,12 @@ class RuntimeFactory:
             tool_result_dir = paths.tool_result_dir,
             transcript_dir = paths.transcript_dir,
         )
+
+        tools = ToolExecutor(
+            registry = policy.tool_handler,
+            allowed_tools = policy.tools_list,
+            workspace = workspace,
+        )
         
         return AgentRuntime(
             session_id = session_id,
@@ -187,4 +190,5 @@ class RuntimeFactory:
             paths = paths,
             memory = memory,
             artifacts = artifacts,
+            tools = tools,
         )

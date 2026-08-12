@@ -141,7 +141,7 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
             continue
 
         # 执行工具调用
-        output = tools.call_tool(block.name, block.input)
+        output = runtime.tools.execute(block.name, block.input)
 
         # 触发 PostToolUse hook
         hook.trigger_hooks("PostToolUse", block, output)
