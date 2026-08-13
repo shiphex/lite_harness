@@ -49,7 +49,7 @@ class HookContext:
 @dataclass
 class HookResult:
     """ 钩子结果数据类。定义了 hook 事件触发时的结果。"""
-    blocked: bool = True
+    blocked: bool = False
     message: str | None = None
     # modified_input: dict | None = None
 
@@ -102,7 +102,7 @@ class HookManager:
             if result.blocked:
                 return result
 
-        return HookResult()
+        return HookResult(blocked=False)
 
 
 def create_default_hooks() -> HookManager:

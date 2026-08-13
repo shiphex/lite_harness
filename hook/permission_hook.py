@@ -12,7 +12,7 @@
 
 import config
 import cli
-from hook import HookContext, HookResult
+
 
 # 获取项目根目录
 WORKDIR = config.Config().get_path_config("project_path")
@@ -82,7 +82,7 @@ PERMISSION_RULES = [
 ]
 
 
-def permission_hook(ctx: HookContext, block):
+def permission_hook(ctx, block):
     """ 检查工具调用权限 hook 函数。
 
     PreToolUse：检查工具调用权限。
@@ -93,6 +93,8 @@ def permission_hook(ctx: HookContext, block):
             "权限已被用户拒绝"：用户拒绝调用该工具。
         None: 如果权限被允许，返回 None。
     """
+    
+    from .hook_handler import HookResult
 
     # 禁止命令检测
     if block.name == "powershell":
@@ -119,4 +121,4 @@ def permission_hook(ctx: HookContext, block):
                     message="权限已被用户拒绝",
                 )
 
-    return HookResult()
+    return HookResult(blocked=False)
