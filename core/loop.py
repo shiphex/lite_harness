@@ -19,6 +19,7 @@ from api.contract import ModelRequest, ModelResponse
 from .runtime import AgentRuntime
 
 
+
 def compact_pipeline(runtime: AgentRuntime):
     """ 执行压缩管线，压缩会话历史记录。
 
@@ -134,17 +135,27 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
             return results, status
 
         # 在执行之前，触发 PreToolUse hook
-        blocked = hook.trigger_hooks("PreToolUse", block)
-        if blocked:
+        hook_ctx = hook.make_hook_context(runtime)
+        hook_result = runtime.hooks.run(hook.HookEvent.PRE_TOOL_USE,
+                                        hook_ctx,
+                                        block,
+                                        )
+        if hook_result.blocked:
             # 返回并记录 PreToolUse hook 的结果
-            results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(blocked)})
+            results.append({"type": "tool_result", 
+                            "tool_use_id": block.id, 
+                            "content": str(hook_result.message or "Tool use blocked by hook.")})
             continue
 
         # 执行工具调用
         output = runtime.tools.execute(block.name, block.input)
 
         # 触发 PostToolUse hook
-        hook.trigger_hooks("PostToolUse", block, output)
+        runtime.hooks.run(hook.HookEvent.POST_TOOL_USE,
+                          hook_ctx,
+                          block,
+                          output,
+        )
 
         cli.put_agent_other_info(f"{output[:200]}")
         # 保存工具调用结果
@@ -265,9 +276,13 @@ def query_loop(runtime: AgentRuntime):
             runtime.memory.consolidate(runtime)
     
             # 触发 Stop hook
-            force = hook.trigger_hooks("Stop", messages)
-            if force:
-                messages.append({"role": "user", "content": force})
+            hook_ctx = hook.make_hook_context(runtime)
+            force = runtime.hooks.run(hook.HookEvent.STOP,
+                                      hook_ctx, 
+                                      messages,
+                    )
+            if force.blocked:
+                messages.append({"role": "user", "content": force.message})
             state.messages = messages
             state.context = context
             return state, {"reason": "completed"}               # return Terminal — 唯一的退出点

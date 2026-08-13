@@ -8,8 +8,9 @@ Typical usage example:
 """
 
 import cli
+from hook import HookContext, HookResult
 
-def log_hook(block):
+def log_hook(ctx: HookContext, block):
     """ 记录每次工具调用。
 
     PreToolUse：该 hook 用于在每次工具调用时记录工具调用信息。

@@ -9,6 +9,7 @@ from builtin.memory import MemoryManager, MemoryPolicy
 from builtin.artifacts import ArtifactStore
 from tools.tool_handler import ToolExecutor
 from builtin.load_prompt import PromptBuilder
+from hook.hook_handler import HookManager, create_default_hooks
 
 
 @dataclass()
@@ -106,16 +107,6 @@ class RuntimePaths:
 
 
 @dataclass
-class HookManager:
-    """ 用于管理 agent 运行时的 Hook
-
-    包括 UserPromptSubmit、ToolCall 等。
-    """
-    hooks: List = field(default_factory=list)
-
-
-
-@dataclass
 class AgentRuntime:
     session_id: str
     agent_name: str
@@ -130,7 +121,7 @@ class AgentRuntime:
     memory: MemoryManager
     artifacts: ArtifactStore
 
-    # hooks: HookManager
+    hooks: HookManager
     # events: EventSink
     tools: ToolExecutor
 
@@ -147,6 +138,7 @@ class RuntimeFactory:
         memory_policy: MemoryPolicy,
         workspace: Path,
         session_id: str | None = None,
+        hooks: HookManager | None = None,
     ) -> AgentRuntime:
 
         session_id = session_id or uuid4().hex[:8]
@@ -174,6 +166,8 @@ class RuntimeFactory:
             transcript_dir = paths.transcript_dir,
         )
 
+        hooks = hooks or create_default_hooks()
+
         tools = ToolExecutor(
             registry = policy.tool_handler,
             allowed_tools = policy.tools_list,
@@ -190,5 +184,6 @@ class RuntimeFactory:
             prompt = prompt,
             memory = memory,
             artifacts = artifacts,
+            hooks = hooks,
             tools = tools,
         )

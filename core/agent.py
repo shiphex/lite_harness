@@ -111,7 +111,11 @@ def master_agent():
             break
         
         # 执行 UserPromptSubmit hook
-        hook.trigger_hooks("UserPromptSubmit", user_input)
+        runtime.hooks.run(
+            hook.HookEvent.USER_PROMPT_SUBMIT,
+            hook.make_hook_context(runtime),
+            user_input,
+        )
 
         # 记录用户输入
         history.append({"role": "user", "content": user_input})

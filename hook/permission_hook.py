@@ -12,6 +12,7 @@
 
 import config
 import cli
+from hook import HookContext, HookResult
 
 # 获取项目根目录
 WORKDIR = config.Config().get_path_config("project_path")
@@ -81,7 +82,7 @@ PERMISSION_RULES = [
 ]
 
 
-def permission_hook(block):
+def permission_hook(ctx: HookContext, block):
     """ 检查工具调用权限 hook 函数。
 
     PreToolUse：检查工具调用权限。
@@ -95,10 +96,13 @@ def permission_hook(block):
 
     # 禁止命令检测
     if block.name == "powershell":
+        command = block.input.get("command", "")
         for pattern in DENY_LIST_LINUX + DENY_LIST_POWERSHELL:
-            if pattern in block.input.get("command", ""):
-                cli.inform_system_warning(f"⛔ 已屏蔽：'{pattern}' 已在拒绝列表中。")
-                return "权限已被拒绝列表拒绝"
+            if pattern in command:
+                return HookResult(
+                    blocked=True,
+                    message="权限已被拒绝列表拒绝",
+                )
 
     # 规则匹配
     for rule in PERMISSION_RULES:
@@ -110,6 +114,9 @@ def permission_hook(block):
             cli.inform_system_info(f"    Tool: {block.name}({block.input})")
             choice = cli.get_user_input("\n    是否继续？(y/N): ").strip().lower()
             if choice not in ("y", "yes"):
-                return "权限已被用户拒绝"
+                return HookResult(
+                    blocked=True,
+                    message="权限已被用户拒绝",
+                )
 
-    return None
+    return HookResult()

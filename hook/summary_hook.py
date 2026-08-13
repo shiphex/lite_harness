@@ -10,9 +10,10 @@
 
 
 import cli
+from hook import HookContext, HookResult
 
 
-def summary_hook(message: list):
+def summary_hook(ctx: HookContext, message: list):
     """ 打印摘要的 hook 函数。
 
     循环即将结束时打印摘要。
