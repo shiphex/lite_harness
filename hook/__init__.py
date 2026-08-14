@@ -1,5 +1,5 @@
 from .hook_handler import register_hook, trigger_hooks
-from .hook_handler import HookContext, make_hook_context, HookEvent, HookResult
+from .hook_handler import HookContext, make_hook_context, HookEvent, HookResult, HookAction
 
 __all__ = [
     "register_hook",
@@ -8,4 +8,5 @@ __all__ = [
     "make_hook_context",
     "HookEvent",
     "HookResult",
+    "HookAction",
 ]

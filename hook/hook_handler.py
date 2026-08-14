@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from collections import defaultdict
 from collections.abc import Callable
+from enum import StrEnum
 
 
 class HookEvent(str, Enum):
@@ -36,6 +37,19 @@ class HookEvent(str, Enum):
     STOP = "stop"
 
 
+class HookAction(StrEnum):
+    """ 钩子操作枚举。定义了 hook 事件触发时的可能操作。
+    
+    Attributes:
+        CONTINUE: 继续执行后续 hook。
+        BLOCK: 停止后续 hook 执行。
+        ASK: 请求用户确认后续 hook。
+    """
+    CONTINUE = "continue"
+    BLOCK = "block"
+    ASK = "ask"
+
+
 @dataclass
 class HookContext:
     """ 钩子上下文数据类。定义了 hook 事件触发时的上下文信息。"""
@@ -49,9 +63,19 @@ class HookContext:
 @dataclass
 class HookResult:
     """ 钩子结果数据类。定义了 hook 事件触发时的结果。"""
-    blocked: bool = False
     message: str | None = None
+    action: HookAction = HookAction.CONTINUE
+
     # modified_input: dict | None = None
+    # modified_output: dict | None = None
+
+    @property
+    def blocked(self) -> bool:
+        return self.action == HookAction.BLOCK
+
+    @property
+    def approval_required(self) -> bool:
+        return self.action == HookAction.ASK
 
 
 def make_hook_context(runtime) -> HookContext:
@@ -99,10 +123,10 @@ class HookManager:
             if result is None:
                 continue
 
-            if result.blocked:
+            if result.action != HookAction.CONTINUE:
                 return result
 
-        return HookResult(blocked=False)
+        return HookResult()
 
 
 def create_default_hooks() -> HookManager:
@@ -184,6 +208,6 @@ def trigger_hooks(event: str, *args):   # args 收集调用时传入的额外参
 
 register_hook("UserPromptSubmit", context_inject_hook)
 register_hook("PreToolUse", permission_hook)
-register_hook("PreToolUse", log_hook)
+# register_hook("PreToolUse", log_hook)
 register_hook("PostToolUse", large_output_hook)
 register_hook("Stop", summary_hook)

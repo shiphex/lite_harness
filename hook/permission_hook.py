@@ -11,7 +11,6 @@
 """
 
 import config
-import cli
 
 
 # 获取项目根目录
@@ -95,6 +94,7 @@ def permission_hook(ctx, block):
     """
     
     from .hook_handler import HookResult
+    from .hook_handler import HookAction
 
     # 禁止命令检测
     if block.name == "powershell":
@@ -102,7 +102,7 @@ def permission_hook(ctx, block):
         for pattern in DENY_LIST_LINUX + DENY_LIST_POWERSHELL:
             if pattern in command:
                 return HookResult(
-                    blocked=True,
+                    action = HookAction.BLOCK,
                     message="权限已被拒绝列表拒绝",
                 )
 
@@ -111,14 +111,19 @@ def permission_hook(ctx, block):
         if block.name in rule["tools"] and rule["check"](block.input):
             reason = rule["message"]
 
+            return HookResult(
+                action=HookAction.ASK,
+                message=f"潜在破坏性指令：{reason}({block.input})",
+            )
+            """
             # 用户批准
             cli.inform_system_info(f"\n\033[33m⚠ {reason}\033[0m")
             cli.inform_system_info(f"    Tool: {block.name}({block.input})")
             choice = cli.get_user_input("\n    是否继续？(y/N): ").strip().lower()
             if choice not in ("y", "yes"):
                 return HookResult(
-                    blocked=True,
+                    action=HookAction.BLOCK,
                     message="权限已被用户拒绝",
                 )
-
-    return HookResult(blocked=False)
+            """
+    return HookResult()

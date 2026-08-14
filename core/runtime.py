@@ -12,6 +12,8 @@ from builtin.load_prompt import PromptBuilder
 from hook.hook_handler import HookManager, create_default_hooks
 from event.sink import EventSink, NullEventSink
 from cli.event_sink import CliEventSink
+from event.interaction import Interaction, NonInteractiveInteraction
+from cli.cli_interaction import CliInteraction
 
 
 
@@ -128,6 +130,8 @@ class AgentRuntime:
     events: EventSink
     tools: ToolExecutor
 
+    interaction: Interaction
+
 
 @dataclass
 class RuntimeFactory:
@@ -143,6 +147,7 @@ class RuntimeFactory:
         session_id: str | None = None,
         hooks: HookManager | None = None,
         events = CliEventSink(),
+        interaction = CliInteraction(),
     ) -> AgentRuntime:
 
         session_id = session_id or uuid4().hex[:8]
@@ -179,6 +184,11 @@ class RuntimeFactory:
             allowed_tools = policy.tools_list,
             workspace = workspace,
         )
+
+        interaction = (
+            interaction
+            or NonInteractiveInteraction()
+        )
         
         return AgentRuntime(
             session_id = session_id,
@@ -193,4 +203,5 @@ class RuntimeFactory:
             hooks = hooks,
             events = events,
             tools = tools,
+            interaction = interaction,
         )

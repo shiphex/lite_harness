@@ -16,6 +16,7 @@ import builtin
 from api.adapter_factory import create_adapter
 from api.contract import ModelRequest, ModelResponse
 from .runtime import AgentRuntime
+from event.interaction import ApprovalRequest
 
 
 def compact_pipeline(runtime: AgentRuntime):
@@ -46,7 +47,13 @@ def compact_pipeline(runtime: AgentRuntime):
     # 若压缩后历史记录超过上下文大小，执行紧凑式压缩
     CONTEXT_LIMIT = 50000
     if tools.estimate_size(messages) > CONTEXT_LIMIT:
-        print("[auto compact]")
+        runtime.events.emit(
+             event.make_event(
+                runtime,
+                event.EventType.COMPACT_STARTED,
+                trigger="auto",
+            )
+        )
         messages[:] = tools.compact_history(messages, runtime.artifacts)
 
     return pre_compress, messages
@@ -146,7 +153,7 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
                                         hook_ctx,
                                         block,
                                         )
-        if hook_result.blocked:
+        if hook_result.action == hook.HookAction.BLOCK:
             # 记录工具调用被阻塞事件
             runtime.events.emit(
                 event.make_event(
@@ -166,6 +173,65 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
                             "tool_use_id": block.id, 
                             "content": str(hook_result.message or "Tool use blocked by hook.")})
             continue
+
+        if hook_result.action == hook.HookAction.ASK:
+            request = ApprovalRequest(
+                tool_call_id=block.id,
+                tool_name=block.name,
+                arguments=block.input,
+                reason=(
+                    hook_result.message
+                    or "该操作需要用户批准"
+                ),
+            )
+
+            runtime.events.emit(
+                event.make_event(
+                    runtime,
+                    event.EventType.APPROVAL_REQUESTED,
+                    tool_call_id=request.tool_call_id,
+                    tool_name=request.tool_name,
+                    arguments=request.arguments,
+                    reason=request.reason,
+                )
+            )
+
+            approval = (
+                runtime.interaction
+                .request_approval(request)
+            )
+
+            runtime.events.emit(
+                event.make_event(
+                    runtime,
+                    event.EventType.APPROVAL_RESOLVED,
+                    tool_call_id=block.id,
+                    tool_name=block.name,
+                    approved=approval.approved,
+                )
+            )
+
+            if not approval.approved:
+            
+                message = "权限已被用户拒绝"
+        
+                runtime.events.emit(
+                    event.make_event(
+                        runtime,
+                        event.EventType.TOOL_BLOCKED,
+                        tool_call_id=block.id,
+                        tool_name=block.name,
+                        reason=message,
+                    )
+                )
+        
+                results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": message,
+                })
+        
+                continue
 
         # 记录工具调用开始事件
         runtime.events.emit(
@@ -277,11 +343,25 @@ def query_loop(runtime: AgentRuntime):
         except Exception as e:
             if builtin.is_prompt_too_long_error(e):
                 if not state.has_attempted_reactive_compact:
-                    print("\033[33m\n⚠ [重新执行压缩]\033[0m")
+                    runtime.events.emit(
+                         event.make_event(
+                            runtime,
+                             event.EventType.COMPACT_STARTED,
+                            trigger="prompt_too_long",
+                        )
+                    )
                     messages[:] = tools.reactive_compact(messages, runtime.artifacts)
                     state.has_attempted_reactive_compact = True
                     continue                # Continue Site 2: Prompt Too Long
-                print("  \033[31m[unrecoverable] 压缩后依然过长。\033[0m")
+                runtime.events.emit(
+                     event.make_event(
+                        runtime,
+                        event.EventType.ERROR,
+                        code="prompt_too_long",
+                        message="上下文过大，压缩后依然无法继续。",
+                        recoverable=False,
+                    )
+                )
                 messages.append({"role": "assistant", "content": [
                     {"type": "text",
                      "text": "[Error] 上下文过大，无法继续。"}]})
