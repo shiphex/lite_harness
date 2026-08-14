@@ -1,4 +1,4 @@
-from hook import large_output_hook
+from hook.large_output_hook import large_output_hook
 from types import SimpleNamespace
 
 
@@ -8,7 +8,7 @@ def test_large_output_hook(capsys):
         name = "powershell",
         output = {"command": "rm test.txt"},
     )
-    result = large_output_hook.large_output_hook(block, block.output)
+    result = large_output_hook(None, block, block.output)
     # 获取终端捕获到的标准输出和标准错误
     captured = capsys.readouterr()
     assert result is None
@@ -21,7 +21,7 @@ def test_large_output_hook(capsys):
         name = "powershell",
         output = "testoutput" * 500,
     )
-    result = large_output_hook.large_output_hook(block, block.output)
+    result = large_output_hook(None, block, block.output)
     # 获取终端捕获到的标准输出和标准错误
     captured = capsys.readouterr()
     assert result is None

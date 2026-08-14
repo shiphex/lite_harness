@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from core import agent
 from core.runtime import state
+from hook.hook_handler import HookEvent
 
 
 def _config(tmp_path):
@@ -52,6 +53,10 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
         ),
         memory=SimpleNamespace(index_path=tmp_path / "MEMORY.md"),
     )
+    hook_calls = []
+    runtime.hooks = SimpleNamespace(
+        run=lambda event, context, *args: hook_calls.append((event, context, args))
+    )
     captured = {}
     outputs = []
     context_updates = []
@@ -77,7 +82,7 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
     monkeypatch.setattr(agent.cli, "inform_system_info", lambda message: None)
     monkeypatch.setattr(agent.cli, "put_agent_output", outputs.append)
     monkeypatch.setattr(agent.cli, "put_agent_other_info", lambda message: None)
-    monkeypatch.setattr(agent.hook, "trigger_hooks", lambda *args: None)
+    monkeypatch.setattr(agent.hook, "make_hook_context", lambda current_runtime: "hook-context")
     monkeypatch.setattr(
         agent.builtin,
         "update_context",
@@ -89,5 +94,8 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
     assert captured["runtime"] is runtime
     assert outputs == ["done"]
     assert runtime.state.messages[0] == {"role": "user", "content": "hello"}
+    assert hook_calls == [
+        (HookEvent.USER_PROMPT_SUBMIT, "hook-context", ("hello",)),
+    ]
     assert len(context_updates) == 2
     assert context_updates[-1][2]["memory_index"] == runtime.memory.index_path

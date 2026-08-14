@@ -1,10 +1,10 @@
 import config
-from hook import context_inject_hook
+from hook.context_inject_hook import context_inject_hook
 
 def test_context_inject_hook(capsys):
     """ 测试 context 注入 hook 函数。 """
     query = "你好"
-    result = context_inject_hook.context_inject_hook(query)
+    result = context_inject_hook(None, query)
 
     # 获取终端捕获到的标准输出和标准错误
     captured = capsys.readouterr()

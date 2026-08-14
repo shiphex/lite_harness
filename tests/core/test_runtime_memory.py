@@ -3,6 +3,11 @@ from builtin.load_prompt import PromptBuilder
 from builtin.memory import MemoryMode, MemoryPolicy, write_memory_file
 from core import loop
 from core.runtime import AgentRuntime, RunPolicy, RuntimeFactory, RuntimePaths, state
+from event import MemoryEventSink
+from event.interaction import NonInteractiveInteraction
+from hook.hook_handler import HookManager
+from cli.cli_interaction import CliInteraction
+from cli.event_sink import CliEventSink
 from tools.tool_handler import ToolExecutor
 
 
@@ -40,6 +45,37 @@ def test_runtime_factory_wires_isolated_paths_and_components(tmp_path):
     assert isinstance(runtime.prompt, PromptBuilder)
     assert isinstance(runtime.tools, ToolExecutor)
     assert runtime.tools.allowed_tools == {"demo_tool"}
+    assert isinstance(runtime.hooks, HookManager)
+    assert isinstance(runtime.events, CliEventSink)
+    assert isinstance(runtime.interaction, CliInteraction)
+
+
+def test_runtime_factory_preserves_injected_runtime_components(tmp_path):
+    hooks = HookManager()
+    events = MemoryEventSink()
+    interaction = NonInteractiveInteraction()
+
+    runtime = RuntimeFactory.create(
+        agent_name="agent",
+        policy=_policy(),
+        state=state(
+            messages=[{"role": "user", "content": "hello"}],
+            current_model={"api": "fake", "model_name": "model"},
+        ),
+        memory_policy=MemoryPolicy(
+            mode=MemoryMode.READ_WRITE,
+            namespace="runtime",
+        ),
+        workspace=tmp_path,
+        session_id="session",
+        hooks=hooks,
+        events=events,
+        interaction=interaction,
+    )
+
+    assert runtime.hooks is hooks
+    assert runtime.events is events
+    assert runtime.interaction is interaction
 
 
 def test_prompt_builder_uses_runtime_memory_index_and_updates_context(tmp_path, monkeypatch):

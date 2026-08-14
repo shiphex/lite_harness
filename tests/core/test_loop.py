@@ -8,6 +8,9 @@ from builtin.artifacts import ArtifactStore
 from builtin.memory import MemoryPolicy, MemoryMode
 from core import loop
 from core.runtime import AgentRuntime, RunPolicy, RuntimePaths, state
+from event import EventType, MemoryEventSink
+from event.interaction import ApprovalResponse
+from hook.hook_handler import HookAction, HookEvent, HookManager, HookResult, create_default_hooks
 from tools.tool_handler import ToolExecutor
 
 
@@ -29,13 +32,35 @@ class MemorySpy:
         return True
 
 
-def make_runtime(tmp_path, *, messages=None, max_turns=10, tools_list=None):
+class InteractionSpy:
+    def __init__(self, approved=True):
+        self.approved = approved
+        self.requests = []
+
+    def request_approval(self, request):
+        self.requests.append(request)
+        return ApprovalResponse(approved=self.approved)
+
+
+def make_runtime(
+    tmp_path,
+    *,
+    messages=None,
+    max_turns=10,
+    tools_list=None,
+    tool_handler=None,
+    hooks=None,
+    events=None,
+    interaction=None,
+):
+    tools_list = tools_list if tools_list is not None else []
+    tool_handler = tool_handler or {"demo_tool": lambda value=None: f"demo:{value}"}
     policy = RunPolicy(
         max_turns=max_turns,
         model={"api": "fake", "model_name": "primary"},
         fallback_model={"api": "fake", "model_name": "fallback"},
-        tools_list=tools_list or [],
-        tool_handler={"demo_tool": lambda value=None: f"demo:{value}"},
+        tools_list=tools_list,
+        tool_handler=tool_handler,
     )
     current_state = state(
         messages=messages or [{"role": "user", "content": "hello"}],
@@ -53,6 +78,9 @@ def make_runtime(tmp_path, *, messages=None, max_turns=10, tools_list=None):
         memory=MemorySpy(tmp_path),
         artifacts=ArtifactStore(paths.tool_result_dir, paths.transcript_dir),
         tools=ToolExecutor(policy.tool_handler, policy.tools_list, tmp_path),
+        hooks=hooks if hooks is not None else HookManager(),
+        events=events if events is not None else MemoryEventSink(),
+        interaction=interaction if interaction is not None else InteractionSpy(),
     )
 
 
@@ -63,8 +91,11 @@ def patch_loop_dependencies(monkeypatch, runtime, adapter):
     monkeypatch.setattr(loop, "struct_massages", lambda messages, memories: list(messages))
     monkeypatch.setattr(loop.builtin, "with_llm_retry", lambda fn, state, policy: fn())
     monkeypatch.setattr(loop, "create_adapter", lambda model: adapter)
-    monkeypatch.setattr(loop.hook, "trigger_hooks", lambda event, *args: None)
-    monkeypatch.setattr(loop.cli, "put_agent_other_info", lambda *args: None)
+    monkeypatch.setattr(
+        runtime.hooks,
+        "run",
+        lambda event, ctx, *args: HookResult(),
+    )
 
 
 def test_query_loop_appends_canonical_final_response(monkeypatch, tmp_path):
@@ -135,18 +166,23 @@ def test_query_loop_round_trips_tool_result_and_response_blocks(monkeypatch, tmp
 
 def test_execute_tool_honors_hook_block_and_triggers_post_hook(monkeypatch, tmp_path):
     executed = []
-    events = []
     runtime = make_runtime(tmp_path, tools_list=[{"name": "demo_tool"}])
     runtime.tools.execute = lambda name, args: executed.append((name, args)) or "ok"
     block = ToolCallPart(id="blocked", name="demo_tool", input={})
     allowed = ToolCallPart(id="allowed", name="demo_tool", input={"value": 2})
 
-    def trigger(event, *args):
-        events.append(event)
-        return "blocked by policy" if event == "PreToolUse" and args[0] is block else None
+    hook_events = []
 
-    monkeypatch.setattr(loop.hook, "trigger_hooks", trigger)
-    monkeypatch.setattr(loop.cli, "put_agent_other_info", lambda *args: None)
+    def run(event, ctx, *args):
+        hook_events.append(event)
+        if event == HookEvent.PRE_TOOL_USE and args[0] is block:
+            return HookResult(
+                action=HookAction.BLOCK,
+                message="blocked by policy",
+            )
+        return HookResult()
+
+    monkeypatch.setattr(runtime.hooks, "run", run)
 
     results, status = loop.execute_tool(
         ModelResponse(content=[block, allowed], stop_reason="tool_use"), runtime
@@ -158,7 +194,98 @@ def test_execute_tool_honors_hook_block_and_triggers_post_hook(monkeypatch, tmp_
         {"type": "tool_result", "tool_use_id": "blocked", "content": "blocked by policy"},
         {"type": "tool_result", "tool_use_id": "allowed", "content": "ok"},
     ]
-    assert events == ["PreToolUse", "PreToolUse", "PostToolUse"]
+    assert hook_events == [
+        HookEvent.PRE_TOOL_USE,
+        HookEvent.PRE_TOOL_USE,
+        HookEvent.POST_TOOL_USE,
+    ]
+    assert [event.type for event in runtime.events.events] == [
+        EventType.TOOL_REQUESTED,
+        EventType.TOOL_BLOCKED,
+        EventType.TOOL_REQUESTED,
+        EventType.TOOL_STARTED,
+        EventType.TOOL_COMPLETED,
+    ]
+
+
+def test_execute_tool_denied_approval_does_not_execute_dangerous_command(tmp_path):
+    executed = []
+    interaction = InteractionSpy(approved=False)
+    runtime = make_runtime(
+        tmp_path,
+        tools_list=[{"name": "powershell"}],
+        tool_handler={
+            "powershell": lambda command: executed.append(command) or "simulated",
+        },
+        hooks=create_default_hooks(),
+        interaction=interaction,
+    )
+    block = ToolCallPart(
+        id="remove-1",
+        name="powershell",
+        input={"command": "Remove-Item test.py"},
+    )
+
+    results, status = loop.execute_tool(
+        ModelResponse(content=[block], stop_reason="tool_use"), runtime
+    )
+
+    assert status == "complete"
+    assert executed == []
+    assert len(interaction.requests) == 1
+    assert interaction.requests[0].tool_call_id == "remove-1"
+    assert interaction.requests[0].tool_name == "powershell"
+    assert interaction.requests[0].arguments == {"command": "Remove-Item test.py"}
+    assert results == [{
+        "type": "tool_result",
+        "tool_use_id": "remove-1",
+        "content": "权限已被用户拒绝",
+    }]
+    assert [event.type for event in runtime.events.events] == [
+        EventType.TOOL_REQUESTED,
+        EventType.APPROVAL_REQUESTED,
+        EventType.APPROVAL_RESOLVED,
+        EventType.TOOL_BLOCKED,
+    ]
+
+
+def test_execute_tool_approved_dangerous_command_executes_once(tmp_path):
+    executed = []
+    interaction = InteractionSpy(approved=True)
+    runtime = make_runtime(
+        tmp_path,
+        tools_list=[{"name": "powershell"}],
+        tool_handler={
+            "powershell": lambda command: executed.append(command) or "simulated",
+        },
+        hooks=create_default_hooks(),
+        interaction=interaction,
+    )
+    block = ToolCallPart(
+        id="remove-2",
+        name="powershell",
+        input={"command": "Remove-Item test.py"},
+    )
+
+    results, status = loop.execute_tool(
+        ModelResponse(content=[block], stop_reason="tool_use"), runtime
+    )
+
+    assert status == "complete"
+    assert executed == ["Remove-Item test.py"]
+    assert interaction.requests[0].reason
+    assert results == [{
+        "type": "tool_result",
+        "tool_use_id": "remove-2",
+        "content": "simulated",
+    }]
+    assert [event.type for event in runtime.events.events] == [
+        EventType.TOOL_REQUESTED,
+        EventType.APPROVAL_REQUESTED,
+        EventType.APPROVAL_RESOLVED,
+        EventType.TOOL_STARTED,
+        EventType.TOOL_COMPLETED,
+    ]
 
 
 def test_query_loop_compact_uses_runtime_artifacts(monkeypatch, tmp_path):
@@ -193,11 +320,12 @@ def test_query_loop_appends_stop_hook_prompt(monkeypatch, tmp_path):
     patch_loop_dependencies(monkeypatch, runtime, SimpleNamespace(
         complete=lambda request: ModelResponse(content=[], stop_reason="end_turn")
     ))
-    monkeypatch.setattr(
-        loop.hook,
-        "trigger_hooks",
-        lambda event, *args: "please continue" if event == "Stop" else None,
-    )
+    def run(event, ctx, *args):
+        if event == HookEvent.STOP:
+            return HookResult(action=HookAction.BLOCK, message="please continue")
+        return HookResult()
+
+    monkeypatch.setattr(runtime.hooks, "run", run)
 
     loop.query_loop(runtime)
 
