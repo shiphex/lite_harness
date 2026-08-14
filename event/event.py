@@ -1,11 +1,13 @@
 """ Event types """
 
+
+from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.runtime import AgentRuntime

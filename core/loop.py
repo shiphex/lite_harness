@@ -7,9 +7,8 @@ Typical usage example:
     agent_loop(messages)
 """
 
-from dataclasses import dataclass
-import cli
-import api
+
+import event
 import tools
 import hook
 import builtin
@@ -17,7 +16,6 @@ import builtin
 from api.adapter_factory import create_adapter
 from api.contract import ModelRequest, ModelResponse
 from .runtime import AgentRuntime
-
 
 
 def compact_pipeline(runtime: AgentRuntime):
@@ -120,8 +118,16 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
             continue                    # Continue Site 7: Tool Execution
 
         # 7. 执行工具调用
-        # 打印工具调用名称
-        cli.put_agent_other_info(f"[TOOL]: {block.name}")
+        # 记录工具调用事件
+        runtime.events.emit(
+            event.make_event(
+                runtime,
+                event.EventType.TOOL_REQUESTED,
+                tool_call_id=block.id,
+                tool_name=block.name,
+                arguments=block.input,
+            )
+        )
 
         # 对调用了压缩工具进行处理
         if block.name == "compact":
@@ -141,11 +147,36 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
                                         block,
                                         )
         if hook_result.blocked:
+            # 记录工具调用被阻塞事件
+            runtime.events.emit(
+                event.make_event(
+                    runtime,
+                    event.EventType.TOOL_BLOCKED,
+                    tool_call_id=block.id,
+                    tool_name=block.name,
+                    reason=str(
+                        hook_result.message
+                        or "Tool use blocked by hook."
+                    ),
+                )
+            )
+
             # 返回并记录 PreToolUse hook 的结果
             results.append({"type": "tool_result", 
                             "tool_use_id": block.id, 
                             "content": str(hook_result.message or "Tool use blocked by hook.")})
             continue
+
+        # 记录工具调用开始事件
+        runtime.events.emit(
+            event.make_event(
+                runtime,
+                event.EventType.TOOL_STARTED,
+                tool_call_id=block.id,
+                tool_name=block.name,
+                arguments=block.input,
+            )
+        )
 
         # 执行工具调用
         output = runtime.tools.execute(block.name, block.input)
@@ -157,7 +188,16 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
                           output,
         )
 
-        cli.put_agent_other_info(f"{output[:200]}")
+        # 记录工具调用完成事件
+        runtime.events.emit(
+            event.make_event(
+                runtime,
+                event.EventType.TOOL_COMPLETED,
+                tool_call_id=block.id,
+                tool_name=block.name,
+                output=output,
+            )
+        )
         # 保存工具调用结果
         results.append({
             "type": "tool_result",
@@ -283,6 +323,8 @@ def query_loop(runtime: AgentRuntime):
                     )
             if force.blocked:
                 messages.append({"role": "user", "content": force.message})
+                continue
+            
             state.messages = messages
             state.context = context
             return state, {"reason": "completed"}               # return Terminal — 唯一的退出点

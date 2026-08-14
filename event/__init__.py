@@ -1,4 +1,4 @@
-from ..event.event import (
+from .event import (
     Event,
     EventType,
     make_event,

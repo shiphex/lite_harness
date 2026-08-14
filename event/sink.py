@@ -1,8 +1,7 @@
 
 
-
 from typing import Protocol
-from .event import Event, EventType
+from .event import Event
 
 
 class EventSink(Protocol):
