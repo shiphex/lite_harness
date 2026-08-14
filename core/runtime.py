@@ -10,6 +10,9 @@ from builtin.artifacts import ArtifactStore
 from tools.tool_handler import ToolExecutor
 from builtin.load_prompt import PromptBuilder
 from hook.hook_handler import HookManager, create_default_hooks
+from event.sink import EventSink, NullEventSink
+from cli.event_sink import CliEventSink
+
 
 
 @dataclass()
@@ -122,7 +125,7 @@ class AgentRuntime:
     artifacts: ArtifactStore
 
     hooks: HookManager
-    # events: EventSink
+    events: EventSink
     tools: ToolExecutor
 
 
@@ -139,6 +142,7 @@ class RuntimeFactory:
         workspace: Path,
         session_id: str | None = None,
         hooks: HookManager | None = None,
+        events = CliEventSink(),
     ) -> AgentRuntime:
 
         session_id = session_id or uuid4().hex[:8]
@@ -168,6 +172,8 @@ class RuntimeFactory:
 
         hooks = hooks or create_default_hooks()
 
+        events = events or NullEventSink()
+
         tools = ToolExecutor(
             registry = policy.tool_handler,
             allowed_tools = policy.tools_list,
@@ -185,5 +191,6 @@ class RuntimeFactory:
             memory = memory,
             artifacts = artifacts,
             hooks = hooks,
+            events = events,
             tools = tools,
         )
