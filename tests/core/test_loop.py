@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import event
 from api.contract import ModelResponse, TextPart, ToolCallPart
 from builtin.artifacts import ArtifactStore
 from builtin.memory import MemoryPolicy, MemoryMode
@@ -33,13 +34,17 @@ class MemorySpy:
 
 
 class InteractionSpy:
-    def __init__(self, approved=True):
+    def __init__(self, approved=True, message=None):
         self.approved = approved
+        self.message = message
         self.requests = []
 
     def request_approval(self, request):
         self.requests.append(request)
-        return ApprovalResponse(approved=self.approved)
+        return ApprovalResponse(
+            approved=self.approved,
+            message=self.message,
+        )
 
 
 def make_runtime(
@@ -122,6 +127,78 @@ def test_query_loop_appends_canonical_final_response(monkeypatch, tmp_path):
     ]
 
 
+def test_compact_pipeline_emits_start_and_complete_events(monkeypatch, tmp_path):
+    runtime = make_runtime(tmp_path)
+    monkeypatch.setattr(
+        loop.tools,
+        "tool_result_budget",
+        lambda messages, artifacts: messages,
+    )
+    monkeypatch.setattr(loop.tools, "snip_compact", lambda messages: messages)
+    monkeypatch.setattr(loop.tools, "micro_compact", lambda messages: messages)
+
+    pre_compress, messages = loop.compact_pipeline(runtime)
+
+    assert pre_compress == [{"role": "user", "content": "hello"}]
+    assert messages == runtime.state.messages
+    assert [item.type for item in runtime.events.events] == [
+        EventType.COMPACT_STARTED,
+        EventType.COMPACT_COMPLETED,
+    ]
+    assert runtime.events.events[0].data == {"trigger": "auto start compact."}
+    assert runtime.events.events[1].data == {"trigger": "auto complete compact."}
+
+
+def test_query_loop_emits_turn_and_run_lifecycle_events(monkeypatch, tmp_path):
+    runtime = make_runtime(tmp_path)
+
+    def compact_with_events(current_runtime):
+        current_runtime.events.emit(
+            event.make_event(
+                current_runtime,
+                EventType.COMPACT_STARTED,
+                trigger="test compact start",
+            )
+        )
+        current_runtime.events.emit(
+            event.make_event(
+                current_runtime,
+                EventType.COMPACT_COMPLETED,
+                trigger="test compact complete",
+            )
+        )
+        return list(current_runtime.state.messages), current_runtime.state.messages
+
+    monkeypatch.setattr(loop, "compact_pipeline", compact_with_events)
+    monkeypatch.setattr(loop.builtin, "with_llm_retry", lambda fn, state, policy: fn())
+    monkeypatch.setattr(
+        loop,
+        "create_adapter",
+        lambda model: SimpleNamespace(
+            complete=lambda request: ModelResponse(
+                content=[TextPart("done")],
+                stop_reason="end_turn",
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        runtime.hooks,
+        "run",
+        lambda event, ctx, *args: HookResult(),
+    )
+
+    loop.query_loop(runtime)
+
+    assert [item.type for item in runtime.events.events] == [
+        EventType.TURN_STARTED,
+        EventType.COMPACT_STARTED,
+        EventType.COMPACT_COMPLETED,
+        EventType.RUN_COMPLETED,
+    ]
+    assert runtime.events.events[0].data == {"trigger": "turn 1 started"}
+    assert runtime.events.events[-1].data == {"trigger": "run completed"}
+
+
 def test_query_loop_round_trips_tool_result_and_response_blocks(monkeypatch, tmp_path):
     requests = []
     responses = iter([
@@ -201,8 +278,12 @@ def test_execute_tool_honors_hook_block_and_triggers_post_hook(monkeypatch, tmp_
     ]
     assert [event.type for event in runtime.events.events] == [
         EventType.TOOL_REQUESTED,
+        EventType.COMPACT_STARTED,
+        EventType.COMPACT_COMPLETED,
         EventType.TOOL_BLOCKED,
         EventType.TOOL_REQUESTED,
+        EventType.COMPACT_STARTED,
+        EventType.COMPACT_COMPLETED,
         EventType.TOOL_STARTED,
         EventType.TOOL_COMPLETED,
     ]
@@ -210,7 +291,7 @@ def test_execute_tool_honors_hook_block_and_triggers_post_hook(monkeypatch, tmp_
 
 def test_execute_tool_denied_approval_does_not_execute_dangerous_command(tmp_path):
     executed = []
-    interaction = InteractionSpy(approved=False)
+    interaction = InteractionSpy(approved=False, message="user cancelled")
     runtime = make_runtime(
         tmp_path,
         tools_list=[{"name": "powershell"}],
@@ -239,14 +320,32 @@ def test_execute_tool_denied_approval_does_not_execute_dangerous_command(tmp_pat
     assert results == [{
         "type": "tool_result",
         "tool_use_id": "remove-1",
-        "content": "权限已被用户拒绝",
+        "content": "user cancelled",
     }]
     assert [event.type for event in runtime.events.events] == [
         EventType.TOOL_REQUESTED,
+        EventType.COMPACT_STARTED,
+        EventType.COMPACT_COMPLETED,
         EventType.APPROVAL_REQUESTED,
         EventType.APPROVAL_RESOLVED,
         EventType.TOOL_BLOCKED,
     ]
+    assert runtime.events.events[3].data == {
+        "tool_call_id": "remove-1",
+        "tool_name": "powershell",
+        "arguments": {"command": "Remove-Item test.py"},
+        "reason": interaction.requests[0].reason,
+    }
+    assert runtime.events.events[4].data == {
+        "tool_call_id": "remove-1",
+        "tool_name": "powershell",
+        "approved": False,
+    }
+    assert runtime.events.events[5].data == {
+        "tool_call_id": "remove-1",
+        "tool_name": "powershell",
+        "reason": "user cancelled",
+    }
 
 
 def test_execute_tool_approved_dangerous_command_executes_once(tmp_path):
@@ -281,11 +380,19 @@ def test_execute_tool_approved_dangerous_command_executes_once(tmp_path):
     }]
     assert [event.type for event in runtime.events.events] == [
         EventType.TOOL_REQUESTED,
+        EventType.COMPACT_STARTED,
+        EventType.COMPACT_COMPLETED,
         EventType.APPROVAL_REQUESTED,
         EventType.APPROVAL_RESOLVED,
         EventType.TOOL_STARTED,
         EventType.TOOL_COMPLETED,
     ]
+    assert runtime.events.events[3].data["tool_call_id"] == "remove-2"
+    assert runtime.events.events[4].data == {
+        "tool_call_id": "remove-2",
+        "tool_name": "powershell",
+        "approved": True,
+    }
 
 
 def test_query_loop_compact_uses_runtime_artifacts(monkeypatch, tmp_path):
@@ -387,6 +494,64 @@ def test_query_loop_reacts_to_prompt_too_long_once(monkeypatch, tmp_path):
     assert len(calls) == 2
     assert compact_calls == [runtime.artifacts]
     assert runtime.state.has_attempted_reactive_compact is True
+
+
+def test_query_loop_emits_error_and_completion_when_prompt_stays_too_long(
+    monkeypatch,
+    tmp_path,
+):
+    class PromptTooLong(Exception):
+        pass
+
+    runtime = make_runtime(tmp_path)
+    patch_loop_dependencies(
+        monkeypatch,
+        runtime,
+        SimpleNamespace(
+            complete=lambda request: (_ for _ in ()).throw(
+                PromptTooLong("context is too long")
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        loop.builtin,
+        "is_prompt_too_long_error",
+        lambda error: isinstance(error, PromptTooLong),
+    )
+    monkeypatch.setattr(
+        loop.tools,
+        "reactive_compact",
+        lambda messages, artifacts: messages,
+    )
+
+    result_state, status = loop.query_loop(runtime)
+
+    assert result_state is runtime.state
+    assert status == {"reason": "prompt_too_long"}
+    assert [item.type for item in runtime.events.events] == [
+        EventType.TURN_STARTED,
+        EventType.COMPACT_STARTED,
+        EventType.TURN_STARTED,
+        EventType.ERROR,
+        EventType.RUN_COMPLETED,
+    ]
+    assert runtime.events.events[0].data == {
+        "trigger": "turn 1 started",
+    }
+    assert runtime.events.events[1].data == {
+        "trigger": "prompt_too_long",
+    }
+    assert runtime.events.events[2].data == {
+        "trigger": "turn 2 started",
+    }
+    assert runtime.events.events[3].data == {
+        "code": "prompt_too_long",
+        "message": "上下文过大，压缩后依然无法继续。",
+        "recoverable": False,
+    }
+    assert runtime.events.events[4].data == {
+        "trigger": "prompt_too_long",
+    }
 
 
 def test_query_loop_uses_fallback_model_after_retry_switch(monkeypatch, tmp_path):

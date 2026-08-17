@@ -3,6 +3,9 @@ from types import SimpleNamespace
 
 from core import agent
 from core.runtime import state
+from event import EventType
+from cli.cli_interaction import CliInteraction
+from cli.event_sink import CliEventSink
 from hook.hook_handler import HookEvent
 
 
@@ -41,10 +44,16 @@ def test_create_master_runtime_builds_policy_and_state(monkeypatch, tmp_path):
     assert runtime.state.max_output_tokens == 1234
     assert runtime.state.recovery_count == 0
     assert runtime.paths.workspace == tmp_path
+    assert isinstance(runtime.events, CliEventSink)
+    assert isinstance(runtime.interaction, CliInteraction)
 
 
 def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_path):
+    events = []
+    inputs = iter(["hello", "q"])
     runtime = SimpleNamespace(
+        session_id="session",
+        agent_id="agent",
         state=state(
             messages=[],
             context={},
@@ -52,13 +61,16 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
             current_model={"model_name": "model"},
         ),
         memory=SimpleNamespace(index_path=tmp_path / "MEMORY.md"),
+        events=SimpleNamespace(emit=events.append),
+        interaction=SimpleNamespace(
+            get_user_input=lambda message=">> ": next(inputs),
+        ),
     )
     hook_calls = []
     runtime.hooks = SimpleNamespace(
         run=lambda event, context, *args: hook_calls.append((event, context, args))
     )
     captured = {}
-    outputs = []
     context_updates = []
 
     def fake_query_loop(current_runtime):
@@ -70,7 +82,6 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
         })
         return current_runtime.state, {"reason": "completed"}
 
-    inputs = iter(["hello", "q"])
     def fake_create_runtime(history, context):
         runtime.state.messages = history
         runtime.state.context = context
@@ -78,10 +89,6 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
 
     monkeypatch.setattr(agent, "create_master_runtime", fake_create_runtime)
     monkeypatch.setattr(agent, "query_loop", fake_query_loop)
-    monkeypatch.setattr(agent.cli, "get_user_input", lambda: next(inputs))
-    monkeypatch.setattr(agent.cli, "inform_system_info", lambda message: None)
-    monkeypatch.setattr(agent.cli, "put_agent_output", outputs.append)
-    monkeypatch.setattr(agent.cli, "put_agent_other_info", lambda message: None)
     monkeypatch.setattr(agent.hook, "make_hook_context", lambda current_runtime: "hook-context")
     monkeypatch.setattr(
         agent.builtin,
@@ -92,10 +99,19 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
     agent.master_agent()
 
     assert captured["runtime"] is runtime
-    assert outputs == ["done"]
     assert runtime.state.messages[0] == {"role": "user", "content": "hello"}
     assert hook_calls == [
         (HookEvent.USER_PROMPT_SUBMIT, "hook-context", ("hello",)),
     ]
     assert len(context_updates) == 2
     assert context_updates[-1][2]["memory_index"] == runtime.memory.index_path
+    assert [item.type for item in events] == [
+        EventType.SYSTEM_MESSAGE,
+        EventType.ASSISTANT_MESSAGE,
+        EventType.RUN_COMPLETED,
+    ]
+    assert events[0].data["trigger"] == "输入问题，回车发送。输入 q 退出。"
+    assert events[1].data == {"text": "done"}
+    assert events[2].data == {
+        "trigger": "当前状态：{'reason': 'completed'}",
+    }

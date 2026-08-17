@@ -1,9 +1,13 @@
+from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
+
+import pytest
 
 from event import EventType, make_event
 
 
 def test_event_type_exposes_structured_runtime_values():
+    assert EventType.SYSTEM_MESSAGE == "system.message"
     assert EventType.TOOL_REQUESTED == "tool.requested"
     assert EventType.TOOL_COMPLETED == "tool.completed"
     assert EventType.APPROVAL_REQUESTED == "approval.requested"
@@ -45,3 +49,14 @@ def test_make_event_creates_unique_ids():
 
     assert first.event_id != second.event_id
 
+
+def test_event_is_immutable():
+    runtime = SimpleNamespace(
+        session_id="session-1",
+        agent_id="agent-1",
+        state=SimpleNamespace(turn_count=0),
+    )
+    event = make_event(runtime, EventType.TURN_STARTED)
+
+    with pytest.raises(FrozenInstanceError):
+        event.turn = 1

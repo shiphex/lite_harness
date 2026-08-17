@@ -17,7 +17,15 @@ def test_approval_models_store_request_and_response_data():
     assert request.tool_name == "powershell"
     assert request.arguments == {"command": "Remove-Item test.py"}
     assert request.reason == "dangerous command"
-    assert ApprovalResponse(approved=True).approved is True
+    response = ApprovalResponse(approved=True)
+    assert response.approved is True
+    assert response.message is None
+
+    custom_response = ApprovalResponse(
+        approved=False,
+        message="user cancelled",
+    )
+    assert custom_response.message == "user cancelled"
 
 
 def test_non_interactive_interaction_denies_approval_by_default():
@@ -26,4 +34,3 @@ def test_non_interactive_interaction_denies_approval_by_default():
     response = NonInteractiveInteraction().request_approval(request)
 
     assert response.approved is False
-

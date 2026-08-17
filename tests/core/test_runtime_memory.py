@@ -3,7 +3,7 @@ from builtin.load_prompt import PromptBuilder
 from builtin.memory import MemoryMode, MemoryPolicy, write_memory_file
 from core import loop
 from core.runtime import AgentRuntime, RunPolicy, RuntimeFactory, RuntimePaths, state
-from event import MemoryEventSink
+from event import MemoryEventSink, NullEventSink
 from event.interaction import NonInteractiveInteraction
 from hook.hook_handler import HookManager
 from cli.cli_interaction import CliInteraction
@@ -46,8 +46,8 @@ def test_runtime_factory_wires_isolated_paths_and_components(tmp_path):
     assert isinstance(runtime.tools, ToolExecutor)
     assert runtime.tools.allowed_tools == {"demo_tool"}
     assert isinstance(runtime.hooks, HookManager)
-    assert isinstance(runtime.events, CliEventSink)
-    assert isinstance(runtime.interaction, CliInteraction)
+    assert isinstance(runtime.events, NullEventSink)
+    assert isinstance(runtime.interaction, NonInteractiveInteraction)
 
 
 def test_runtime_factory_preserves_injected_runtime_components(tmp_path):

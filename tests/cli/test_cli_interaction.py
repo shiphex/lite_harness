@@ -1,7 +1,7 @@
 import pytest
 
 from cli.cli_interaction import CliInteraction
-from event.interaction import ApprovalRequest
+from event.interaction import ApprovalRequest, ApprovalResponse
 
 
 def request():
@@ -11,6 +11,17 @@ def request():
         arguments={"command": "Remove-Item test.py"},
         reason="dangerous command",
     )
+
+
+def test_cli_interaction_get_user_input_uses_default_prompt(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(
+        "cli.cli_interaction.cli.get_user_input",
+        lambda prompt: prompts.append(prompt) or "hello",
+    )
+
+    assert CliInteraction().get_user_input() == "hello"
+    assert prompts == [">> "]
 
 
 @pytest.mark.parametrize("choice", ["y", "yes", "Y", "YES"])
@@ -47,3 +58,25 @@ def test_cli_interaction_rejects_non_yes_input(monkeypatch, choice):
 
     assert response.approved is False
 
+
+@pytest.mark.parametrize("exception", [EOFError(), KeyboardInterrupt()])
+def test_cli_interaction_rejects_interrupted_approval(monkeypatch, exception):
+    monkeypatch.setattr(
+        "cli.cli_interaction.cli.inform_system_info",
+        lambda message: None,
+    )
+
+    def interrupt(prompt):
+        raise exception
+
+    monkeypatch.setattr(
+        "cli.cli_interaction.cli.get_user_input",
+        interrupt,
+    )
+
+    response = CliInteraction().request_approval(request())
+
+    assert response == ApprovalResponse(
+        approved=False,
+        message="审批输入被中断",
+    )
