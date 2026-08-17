@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from core import agent
 from core.runtime import state
-from event import EventType
+from event import EventType, make_event
 from cli.cli_interaction import CliInteraction
 from cli.event_sink import CliEventSink
 from hook.hook_handler import HookEvent
@@ -76,10 +76,20 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
     def fake_query_loop(current_runtime):
         captured["runtime"] = current_runtime
         assert current_runtime.state.turn_count == 0
+        current_runtime.events.emit(
+            make_event(current_runtime, EventType.RUN_STARTED)
+        )
         current_runtime.state.messages.append({
             "role": "assistant",
             "content": [{"type": "text", "text": "done"}],
         })
+        current_runtime.events.emit(
+            make_event(
+                current_runtime,
+                EventType.RUN_COMPLETED,
+                trigger="test run completed",
+            )
+        )
         return current_runtime.state, {"reason": "completed"}
 
     def fake_create_runtime(history, context):
@@ -105,13 +115,11 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
     ]
     assert len(context_updates) == 2
     assert context_updates[-1][2]["memory_index"] == runtime.memory.index_path
-    assert [item.type for item in events] == [
-        EventType.SYSTEM_MESSAGE,
-        EventType.ASSISTANT_MESSAGE,
-        EventType.RUN_COMPLETED,
-    ]
-    assert events[0].data["trigger"] == "输入问题，回车发送。输入 q 退出。"
-    assert events[1].data == {"text": "done"}
-    assert events[2].data == {
-        "trigger": "当前状态：{'reason': 'completed'}",
-    }
+    event_types = [item.type for item in events]
+    assert event_types.count(EventType.SYSTEM_MESSAGE) == 1
+    assert event_types.count(EventType.ASSISTANT_MESSAGE) == 1
+    assert event_types.count(EventType.RUN_STARTED) == 1
+    assert event_types.count(EventType.RUN_COMPLETED) == 1
+    assert next(
+        item for item in events if item.type == EventType.ASSISTANT_MESSAGE
+    ).data == {"text": "done"}

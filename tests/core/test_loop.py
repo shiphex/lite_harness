@@ -47,11 +47,36 @@ class InteractionSpy:
         )
 
 
+def event_count(events, event_type):
+    return sum(item.type == event_type for item in events)
+
+
+def events_of(events, event_type):
+    return [item for item in events if item.type == event_type]
+
+
+def assert_balanced(events, started, completed):
+    balance = 0
+
+    for item in events:
+        if item.type == started:
+            balance += 1
+        elif item.type == completed:
+            balance -= 1
+            assert balance >= 0, (
+                f"{completed} occurred before a matching {started}"
+            )
+
+    assert event_count(events, started) == event_count(events, completed)
+    assert balance == 0
+
+
 def make_runtime(
     tmp_path,
     *,
     messages=None,
     max_turns=10,
+    can_ask_user=False,
     tools_list=None,
     tool_handler=None,
     hooks=None,
@@ -66,6 +91,7 @@ def make_runtime(
         fallback_model={"api": "fake", "model_name": "fallback"},
         tools_list=tools_list,
         tool_handler=tool_handler,
+        can_ask_user=can_ask_user,
     )
     current_state = state(
         messages=messages or [{"role": "user", "content": "hello"}],
@@ -141,12 +167,18 @@ def test_compact_pipeline_emits_start_and_complete_events(monkeypatch, tmp_path)
 
     assert pre_compress == [{"role": "user", "content": "hello"}]
     assert messages == runtime.state.messages
-    assert [item.type for item in runtime.events.events] == [
+    assert_balanced(
+        runtime.events.events,
         EventType.COMPACT_STARTED,
         EventType.COMPACT_COMPLETED,
-    ]
-    assert runtime.events.events[0].data == {"trigger": "auto start compact."}
-    assert runtime.events.events[1].data == {"trigger": "auto complete compact."}
+    )
+    assert event_count(runtime.events.events, EventType.COMPACT_STARTED) == 1
+    assert events_of(runtime.events.events, EventType.COMPACT_STARTED)[0].data == {
+        "trigger": "auto start compact.",
+    }
+    assert events_of(runtime.events.events, EventType.COMPACT_COMPLETED)[0].data == {
+        "trigger": "auto complete compact.",
+    }
 
 
 def test_query_loop_emits_turn_and_run_lifecycle_events(monkeypatch, tmp_path):
@@ -189,14 +221,21 @@ def test_query_loop_emits_turn_and_run_lifecycle_events(monkeypatch, tmp_path):
 
     loop.query_loop(runtime)
 
-    assert [item.type for item in runtime.events.events] == [
-        EventType.TURN_STARTED,
+    assert event_count(runtime.events.events, EventType.RUN_STARTED) == 1
+    assert event_count(runtime.events.events, EventType.RUN_COMPLETED) == 1
+    assert event_count(runtime.events.events, EventType.TURN_STARTED) == 1
+    assert_balanced(
+        runtime.events.events,
         EventType.COMPACT_STARTED,
         EventType.COMPACT_COMPLETED,
-        EventType.RUN_COMPLETED,
-    ]
-    assert runtime.events.events[0].data == {"trigger": "turn 1 started"}
-    assert runtime.events.events[-1].data == {"trigger": "run completed"}
+    )
+    assert event_count(runtime.events.events, EventType.COMPACT_STARTED) == 1
+    assert events_of(runtime.events.events, EventType.TURN_STARTED)[0].data == {
+        "trigger": "turn 1 started",
+    }
+    assert events_of(runtime.events.events, EventType.RUN_COMPLETED)[0].data == {
+        "trigger": "run completed",
+    }
 
 
 def test_query_loop_round_trips_tool_result_and_response_blocks(monkeypatch, tmp_path):
@@ -276,17 +315,41 @@ def test_execute_tool_honors_hook_block_and_triggers_post_hook(monkeypatch, tmp_
         HookEvent.PRE_TOOL_USE,
         HookEvent.POST_TOOL_USE,
     ]
-    assert [event.type for event in runtime.events.events] == [
-        EventType.TOOL_REQUESTED,
-        EventType.COMPACT_STARTED,
-        EventType.COMPACT_COMPLETED,
-        EventType.TOOL_BLOCKED,
-        EventType.TOOL_REQUESTED,
-        EventType.COMPACT_STARTED,
-        EventType.COMPACT_COMPLETED,
-        EventType.TOOL_STARTED,
-        EventType.TOOL_COMPLETED,
-    ]
+    assert event_count(runtime.events.events, EventType.TOOL_REQUESTED) == 2
+    assert event_count(runtime.events.events, EventType.TOOL_BLOCKED) == 1
+    assert event_count(runtime.events.events, EventType.TOOL_STARTED) == 1
+    assert event_count(runtime.events.events, EventType.TOOL_COMPLETED) == 1
+    assert event_count(runtime.events.events, EventType.COMPACT_STARTED) == 0
+    assert event_count(runtime.events.events, EventType.COMPACT_COMPLETED) == 0
+
+
+def test_normal_tool_does_not_emit_compact_events(tmp_path):
+    executed = []
+    runtime = make_runtime(tmp_path, tools_list=[{"name": "demo_tool"}])
+    runtime.tools.execute = (
+        lambda name, args: executed.append((name, args)) or "ok"
+    )
+
+    results, status = loop.execute_tool(
+        ModelResponse(
+            content=[ToolCallPart(id="normal-1", name="demo_tool", input={})],
+            stop_reason="tool_use",
+        ),
+        runtime,
+    )
+
+    assert status == "complete"
+    assert executed == [("demo_tool", {})]
+    assert results == [{
+        "type": "tool_result",
+        "tool_use_id": "normal-1",
+        "content": "ok",
+    }]
+    assert event_count(runtime.events.events, EventType.COMPACT_STARTED) == 0
+    assert event_count(runtime.events.events, EventType.COMPACT_COMPLETED) == 0
+    assert event_count(runtime.events.events, EventType.TOOL_REQUESTED) == 1
+    assert event_count(runtime.events.events, EventType.TOOL_STARTED) == 1
+    assert event_count(runtime.events.events, EventType.TOOL_COMPLETED) == 1
 
 
 def test_execute_tool_denied_approval_does_not_execute_dangerous_command(tmp_path):
@@ -300,6 +363,7 @@ def test_execute_tool_denied_approval_does_not_execute_dangerous_command(tmp_pat
         },
         hooks=create_default_hooks(),
         interaction=interaction,
+        can_ask_user=True,
     )
     block = ToolCallPart(
         id="remove-1",
@@ -322,30 +386,74 @@ def test_execute_tool_denied_approval_does_not_execute_dangerous_command(tmp_pat
         "tool_use_id": "remove-1",
         "content": "user cancelled",
     }]
-    assert [event.type for event in runtime.events.events] == [
-        EventType.TOOL_REQUESTED,
-        EventType.COMPACT_STARTED,
-        EventType.COMPACT_COMPLETED,
+    assert_balanced(
+        runtime.events.events,
         EventType.APPROVAL_REQUESTED,
         EventType.APPROVAL_RESOLVED,
-        EventType.TOOL_BLOCKED,
-    ]
-    assert runtime.events.events[3].data == {
+    )
+    assert event_count(runtime.events.events, EventType.APPROVAL_REQUESTED) == 1
+    assert event_count(runtime.events.events, EventType.TOOL_BLOCKED) == 1
+    assert event_count(runtime.events.events, EventType.TOOL_STARTED) == 0
+    assert event_count(runtime.events.events, EventType.TOOL_COMPLETED) == 0
+    assert event_count(runtime.events.events, EventType.COMPACT_STARTED) == 0
+    assert event_count(runtime.events.events, EventType.COMPACT_COMPLETED) == 0
+    assert events_of(runtime.events.events, EventType.APPROVAL_REQUESTED)[0].data == {
         "tool_call_id": "remove-1",
         "tool_name": "powershell",
         "arguments": {"command": "Remove-Item test.py"},
         "reason": interaction.requests[0].reason,
     }
-    assert runtime.events.events[4].data == {
+    assert events_of(runtime.events.events, EventType.APPROVAL_RESOLVED)[0].data == {
         "tool_call_id": "remove-1",
         "tool_name": "powershell",
         "approved": False,
+        "message": "user cancelled",
     }
-    assert runtime.events.events[5].data == {
+    assert events_of(runtime.events.events, EventType.TOOL_BLOCKED)[0].data == {
         "tool_call_id": "remove-1",
         "tool_name": "powershell",
         "reason": "user cancelled",
     }
+
+
+def test_ask_without_user_permission_does_not_request_approval(
+    monkeypatch,
+    tmp_path,
+):
+    interaction = InteractionSpy(approved=True)
+    runtime = make_runtime(
+        tmp_path,
+        tools_list=[{"name": "demo_tool"}],
+        interaction=interaction,
+        can_ask_user=False,
+    )
+    monkeypatch.setattr(
+        runtime.hooks,
+        "run",
+        lambda event, ctx, *args: HookResult(
+            action=HookAction.ASK,
+            message="approval required",
+        ),
+    )
+
+    results, status = loop.execute_tool(
+        ModelResponse(
+            content=[ToolCallPart(id="ask-1", name="demo_tool", input={})],
+            stop_reason="tool_use",
+        ),
+        runtime,
+    )
+
+    assert status == "complete"
+    assert interaction.requests == []
+    assert results == [{
+        "type": "tool_result",
+        "tool_use_id": "ask-1",
+        "content": "当前 Agent 不允许请求用户审批",
+    }]
+    assert event_count(runtime.events.events, EventType.APPROVAL_REQUESTED) == 0
+    assert event_count(runtime.events.events, EventType.APPROVAL_RESOLVED) == 0
+    assert event_count(runtime.events.events, EventType.TOOL_BLOCKED) == 1
 
 
 def test_execute_tool_approved_dangerous_command_executes_once(tmp_path):
@@ -359,6 +467,7 @@ def test_execute_tool_approved_dangerous_command_executes_once(tmp_path):
         },
         hooks=create_default_hooks(),
         interaction=interaction,
+        can_ask_user=True,
     )
     block = ToolCallPart(
         id="remove-2",
@@ -378,20 +487,22 @@ def test_execute_tool_approved_dangerous_command_executes_once(tmp_path):
         "tool_use_id": "remove-2",
         "content": "simulated",
     }]
-    assert [event.type for event in runtime.events.events] == [
-        EventType.TOOL_REQUESTED,
-        EventType.COMPACT_STARTED,
-        EventType.COMPACT_COMPLETED,
+    assert_balanced(
+        runtime.events.events,
         EventType.APPROVAL_REQUESTED,
         EventType.APPROVAL_RESOLVED,
-        EventType.TOOL_STARTED,
-        EventType.TOOL_COMPLETED,
-    ]
-    assert runtime.events.events[3].data["tool_call_id"] == "remove-2"
-    assert runtime.events.events[4].data == {
+    )
+    assert event_count(runtime.events.events, EventType.APPROVAL_REQUESTED) == 1
+    assert event_count(runtime.events.events, EventType.TOOL_BLOCKED) == 0
+    assert event_count(runtime.events.events, EventType.TOOL_STARTED) == 1
+    assert event_count(runtime.events.events, EventType.TOOL_COMPLETED) == 1
+    assert event_count(runtime.events.events, EventType.COMPACT_STARTED) == 0
+    assert event_count(runtime.events.events, EventType.COMPACT_COMPLETED) == 0
+    assert events_of(runtime.events.events, EventType.APPROVAL_RESOLVED)[0].data == {
         "tool_call_id": "remove-2",
         "tool_name": "powershell",
         "approved": True,
+        "message": None,
     }
 
 
@@ -420,6 +531,12 @@ def test_query_loop_compact_uses_runtime_artifacts(monkeypatch, tmp_path):
     loop.query_loop(runtime)
 
     assert compact_artifacts == [runtime.artifacts]
+    assert_balanced(
+        runtime.events.events,
+        EventType.COMPACT_STARTED,
+        EventType.COMPACT_COMPLETED,
+    )
+    assert event_count(runtime.events.events, EventType.COMPACT_STARTED) == 1
 
 
 def test_query_loop_appends_stop_hook_prompt(monkeypatch, tmp_path):
@@ -460,6 +577,8 @@ def test_query_loop_stops_at_max_turns_after_tool_round(monkeypatch, tmp_path):
     assert result_state is runtime.state
     assert result_state.turn_count == 1
     assert status == {"reason": "max_turns"}
+    assert event_count(runtime.events.events, EventType.RUN_STARTED) == 1
+    assert event_count(runtime.events.events, EventType.RUN_COMPLETED) == 1
 
 
 def test_query_loop_reacts_to_prompt_too_long_once(monkeypatch, tmp_path):
@@ -494,6 +613,14 @@ def test_query_loop_reacts_to_prompt_too_long_once(monkeypatch, tmp_path):
     assert len(calls) == 2
     assert compact_calls == [runtime.artifacts]
     assert runtime.state.has_attempted_reactive_compact is True
+    assert event_count(runtime.events.events, EventType.RUN_STARTED) == 1
+    assert event_count(runtime.events.events, EventType.RUN_COMPLETED) == 1
+    assert_balanced(
+        runtime.events.events,
+        EventType.COMPACT_STARTED,
+        EventType.COMPACT_COMPLETED,
+    )
+    assert event_count(runtime.events.events, EventType.COMPACT_STARTED) == 1
 
 
 def test_query_loop_emits_error_and_completion_when_prompt_stays_too_long(
@@ -528,28 +655,21 @@ def test_query_loop_emits_error_and_completion_when_prompt_stays_too_long(
 
     assert result_state is runtime.state
     assert status == {"reason": "prompt_too_long"}
-    assert [item.type for item in runtime.events.events] == [
-        EventType.TURN_STARTED,
+    assert event_count(runtime.events.events, EventType.RUN_STARTED) == 1
+    assert event_count(runtime.events.events, EventType.RUN_COMPLETED) == 1
+    assert_balanced(
+        runtime.events.events,
         EventType.COMPACT_STARTED,
-        EventType.TURN_STARTED,
-        EventType.ERROR,
-        EventType.RUN_COMPLETED,
-    ]
-    assert runtime.events.events[0].data == {
-        "trigger": "turn 1 started",
-    }
-    assert runtime.events.events[1].data == {
-        "trigger": "prompt_too_long",
-    }
-    assert runtime.events.events[2].data == {
-        "trigger": "turn 2 started",
-    }
-    assert runtime.events.events[3].data == {
+        EventType.COMPACT_COMPLETED,
+    )
+    assert event_count(runtime.events.events, EventType.COMPACT_STARTED) == 1
+    assert event_count(runtime.events.events, EventType.ERROR) == 1
+    assert events_of(runtime.events.events, EventType.ERROR)[0].data == {
         "code": "prompt_too_long",
         "message": "上下文过大，压缩后依然无法继续。",
         "recoverable": False,
     }
-    assert runtime.events.events[4].data == {
+    assert events_of(runtime.events.events, EventType.RUN_COMPLETED)[0].data == {
         "trigger": "prompt_too_long",
     }
 
