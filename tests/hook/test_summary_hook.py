@@ -6,7 +6,7 @@ def test_summary_hook(capsys):
         {"role": "assistant", "content": "你好！"},
         {"role": "tool", "content": [{"type": "tool_result", "name": "powershell", "input": {"command": "ls"}}]},
     ]
-    result = summary_hook(messages)
+    result = summary_hook(None, messages)
     tool_count = sum(1 for m in messages 
                      for b in (m.get("content") if isinstance(m.get("content"), list) else [])
                      if isinstance(b, dict) and b.get("type") == "tool_result")

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-import api.anthropic_api as anthropic_api
+import api.old_api.anthropic_api as anthropic_api
 
 
 def test_call_anthropic_model(monkeypatch):

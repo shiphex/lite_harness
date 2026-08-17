@@ -12,7 +12,7 @@ import cli
 import config
 
 
-def large_output_hook(block, output: str):
+def large_output_hook(ctx, block, output: str):
     """ 输出过大时发出警告。
 
     检查输出字符串的长度是否超过 4096 个字符。

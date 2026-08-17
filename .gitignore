@@ -10,10 +10,11 @@ workspace/
 # Virtual environments
 .venv
 
-
-# Documentation
-doc/llm_config.md
+# project output
 .agents/transcripts/
 .agents/.task_output/
 .agents/.memory/
+.agents/runs/
 
+# Documentation
+doc/dev_doc/

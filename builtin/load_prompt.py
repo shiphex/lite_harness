@@ -13,6 +13,7 @@ Typical usage example:
 import json
 import config
 import cli
+from pathlib import Path
 
 try:
     from tools.load_skill import SKILL_REGISTRY
@@ -32,6 +33,25 @@ WORKDIR = config.Config().get_project_path()
 
 MEMORY_INDEX = config.Config().get_path_config("memory_index")
 """记忆索引文件路径。"""
+
+
+class PromptBuilder:
+
+    def build(self, 
+              runtime, 
+        ) -> str:
+
+        context = update_context(
+            runtime.state.context,
+            runtime.state.messages,
+            memory_index=runtime.memory.index_path,
+        )
+        runtime.state.context = context
+        system_prompt = get_system_prompt(runtime, context)
+
+        return system_prompt
+ 
+
 
 # ═══════════════════════════════════════════════════════════
 # 加载系统提示词
@@ -55,15 +75,16 @@ def list_skill() -> str:
 
 
 # 读取记忆索引
-def read_memory_index():
+def read_memory_index(memory_index: Path | None = None):
     """读取记忆索引文件内容。
 
     Returns:
         str: 去除首尾空白后的记忆索引文本；文件不存在或内容为空时返回空字符串。
     """
-    if not MEMORY_INDEX.exists():
+    index_path = memory_index or MEMORY_INDEX
+    if not index_path.is_file():
         return ""
-    text = MEMORY_INDEX.read_text(encoding="utf-8").strip()
+    text = index_path.read_text(encoding="utf-8").strip()
     return text if text else ""
 
 
@@ -97,12 +118,13 @@ PROMPT_SECTIONS = {
     "identity": "你是是一个编码助手，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。",
     "tools": f"当前可用的 tool 有：{', '.join([tool['name'] for tool in TOOLS_LIST])}",
     "workspace": f"当前工作目录是 {WORKDIR}",
+    "skill": f"当前可用的 skill 有：{list_skill()}",
     "memory": "相关记忆内容将在下方插入（如有）。"
 }
 
 
 # 组装系统提示词
-def assemble_system_prompt(context: dict) -> str:
+def assemble_system_prompt(runtime, context: dict) -> str:
     """根据静态片段和运行时上下文组装系统提示词。
 
     Args:
@@ -115,8 +137,10 @@ def assemble_system_prompt(context: dict) -> str:
     sections = []
 
     sections.append(PROMPT_SECTIONS["identity"])
-    sections.append(PROMPT_SECTIONS["tools"])
-    sections.append(PROMPT_SECTIONS["workspace"])
+    sections.append(f"当前可用的 tool 有：{', '.join([tool['name'] for tool in runtime.policy.tools_list])}")
+    sections.append(f"当前工作目录是 {runtime.paths.workspace}")
+    sections.append(PROMPT_SECTIONS["skill"])
+    sections.append(PROMPT_SECTIONS["memory"])
 
     memories = context.get("memories", "")
     if memories:
@@ -129,7 +153,7 @@ _last_context_key = None
 _last_prompt = None
 
 # 获得系统提示词
-def get_system_prompt(context: dict) -> str:
+def get_system_prompt(runtime, context: dict) -> str:
     """获取当前上下文对应的系统提示词。
 
     缓存键由 ``context`` 的稳定 JSON 表示生成。因此，键顺序不同但内容
@@ -147,14 +171,23 @@ def get_system_prompt(context: dict) -> str:
     # sort_keys=True: 字典的键强制按字母升序排序后输出 JSON。
     # ensure_ascii=False: 直接输出原始中文 / 特殊字符，不转义成 Unicode 转义字符。
     # default=str: 处理 JSON 原生不支持序列化的对象，如 None、datetime 等。
-    key = json.dumps(context, sort_keys = True, ensure_ascii = False, default = str)
+    runtime_key = {
+        "workspace": str(runtime.paths.workspace),
+        "tools": runtime.policy.tools_list,
+    }
+    key = json.dumps(
+        {"runtime": runtime_key, "context": context},
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
     if key == _last_context_key and _last_prompt:
         cli.put_agent_other_info("  \033[90m[cache init]系统提示词未变化\033[0m")
         return _last_prompt
 
     # 更新系统提示词
     _last_context_key = key
-    _last_prompt = assemble_system_prompt(context)
+    _last_prompt = assemble_system_prompt(runtime, context)
 
     # 打印加载的段落
     loaded = ["identity", "tools", "workspace"]
@@ -166,7 +199,11 @@ def get_system_prompt(context: dict) -> str:
 
 
 # 更新上下文
-def update_context(context: dict, messages: list) -> dict:
+def update_context(
+    context: dict,
+    messages: list,
+    memory_index: Path | None = None,
+) -> dict:
     """构建提示词组装器需要的运行时上下文。
 
     Args:
@@ -178,11 +215,7 @@ def update_context(context: dict, messages: list) -> dict:
     Returns:
         dict: 包含已启用工具名、工作目录路径，以及可选记忆索引内容的上下文。
     """
-    memories = ""
-    if MEMORY_INDEX.exists():
-        content = MEMORY_INDEX.read_text(encoding = "utf-8").strip()
-        if content:
-            memories = content
+    memories = read_memory_index(memory_index)
     return {
         "enabled_tools": list(TOOLS_HANDLERS.keys()),
         "workspace": str(WORKDIR),

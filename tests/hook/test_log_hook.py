@@ -1,4 +1,4 @@
-from hook import log_hook
+from hook.log_hook import log_hook
 from types import SimpleNamespace
 
 
@@ -7,7 +7,7 @@ def test_log_hook(capsys):
         name = "powershell",
         input = {"values": "test_values"},
     )
-    result = log_hook.log_hook(block)
+    result = log_hook(None, block)
     # 获取终端捕获到的标准输出和标准错误
     captured = capsys.readouterr()
     assert result is None

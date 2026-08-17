@@ -115,9 +115,9 @@ class Config():
         WORKDIR = Path.cwd()
         self.path_config = {
             "project_path": WORKDIR,
+            "skill_dir": WORKDIR / ".agents" / "skills",
             "tool_result_dir": WORKDIR / ".agents" / ".task_output" / "tool_results",
             "transcript_dir": WORKDIR / ".agents" / "transcripts",
-            "skill_dir": WORKDIR / ".agents" / "skills",
             "memory_dir": WORKDIR / ".agents" / ".memory",
             "memory_index": WORKDIR / ".agents" / ".memory" / "MEMORY.md"
         }

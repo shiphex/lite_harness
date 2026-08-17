@@ -10,7 +10,8 @@
 import config
 import cli
 
-def context_inject_hook(query: str):
+
+def context_inject_hook(ctx, query: str):
     """  上下文注入 hook 函数。
 
     UserPromptSubmit：记录用户输入，用于上下文注入。

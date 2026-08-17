@@ -9,7 +9,8 @@ Typical usage example:
 
 import cli
 
-def log_hook(block):
+
+def log_hook(ctx, block):
     """ 记录每次工具调用。
 
     PreToolUse：该 hook 用于在每次工具调用时记录工具调用信息。

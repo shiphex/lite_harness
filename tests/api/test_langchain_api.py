@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-import api.langchain_api as langchain_api
+import api.old_api.langchain_api as langchain_api
 
 
 def test_call_langchain_model_passes_request(monkeypatch):

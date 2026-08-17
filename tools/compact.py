@@ -15,6 +15,7 @@ import json
 import config
 import api
 
+from builtin.artifacts import ArtifactStore, persist_large_output, write_transcript
 
 # 内容长度参数
 content_length = config.Config().get_content_length()
@@ -206,7 +207,7 @@ def micro_compact(messages):
 PERSIST_THRESHOLD_CHARS = int(MAX_INLINE_TOOL_RESULT_TOKENS * CHARS_PER_TOKEN_ESTIMATE)   
 # 所有工具调用结果之和的最大字符数
 TOOL_RESULT_MAX_CHARS = int(COMPACT_TRIGGER_TOKENS * CHARS_PER_TOKEN_ESTIMATE)      
-
+'''
 def persist_large_output(tool_use_id, output):
     """ 保存大的输出到磁盘
     
@@ -226,9 +227,11 @@ def persist_large_output(tool_use_id, output):
         path.write_text(output, encoding = "utf-8")
 
     return f"<persisted-output>\n完整输出所在路径: {path}\n预览:\n{output[:200]}\n</persisted-output>"
+'''
 
-
-def tool_result_budget(messages, max_bytes = TOOL_RESULT_MAX_CHARS):
+def tool_result_budget(messages, 
+                       max_bytes: int = TOOL_RESULT_MAX_CHARS, 
+                       artifacts = None):
     """ 工具调用结果大小评估与储存函数
     
     Args:
@@ -260,7 +263,7 @@ def tool_result_budget(messages, max_bytes = TOOL_RESULT_MAX_CHARS):
         if len(content) <= PERSIST_THRESHOLD_CHARS:
             continue
         tid = block.get("tool_use_id", "Unknown")
-        block["content"] = persist_large_output(tid, content)
+        block["content"] = persist_large_output(artifacts, tid, content, PERSIST_THRESHOLD_CHARS)
         # total = sum(len(block.get("content", "")) for _, block in blocks)
 
     return messages
@@ -268,7 +271,7 @@ def tool_result_budget(messages, max_bytes = TOOL_RESULT_MAX_CHARS):
 
 # ---------------------- L4 LLM 全量摘要 ---------------------
 SUMMARY_INPUT_CHARS = int(SUMMARY_INPUT_BUDGET * CHARS_PER_TOKEN_ESTIMATE)
-
+'''
 def write_transcript(messages):
     """ 将聊天记录写入到一个文件中
     
@@ -288,7 +291,7 @@ def write_transcript(messages):
             f.write(json.dumps(msg, default = str) + "\n")
 
     return path
-
+'''
 
 def summarize_history(messages):
     """ 调用大模型进行总结历史聊天
@@ -312,7 +315,7 @@ def summarize_history(messages):
                      if getattr(block, "type", None) == "text").strip() or "(空摘要)"
 
 
-def compact_history(messages):
+def compact_history(messages, artifacts: ArtifactStore):
     """ LLM 全量摘要函数
     
     该函数用于调用大模型进行总结历史聊天，
@@ -324,7 +327,7 @@ def compact_history(messages):
     Returns:
         messages (list): 压缩后的聊天记录列表。
     """
-    transcript_path = write_transcript(messages)
+    transcript_path = write_transcript(artifacts, messages)
     print(f"已将历史记录写入到 {transcript_path}")
 
     summary = summarize_history(messages)
@@ -333,7 +336,7 @@ def compact_history(messages):
 
 # ------------------ 应急 reactive_compact -------------------
 
-def reactive_compact(messages):
+def reactive_compact(messages, artifacts: ArtifactStore):
     """ 反应性压缩函数
     
     该函数用于在 API Error 时调用，
@@ -345,7 +348,7 @@ def reactive_compact(messages):
     Returns:
         messages (list): 压缩后的聊天记录列表。
     """
-    transcript_path = write_transcript(messages)
+    transcript_path = write_transcript(artifacts, messages)
     tail_start = max(0, len(messages) - 5)
     if (tail_start > 0 and tail_start < len(messages)) \
         and _is_tool_message(messages[tail_start]) \

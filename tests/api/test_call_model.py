@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 
 def test_call_model(monkeypatch):
-    call_model_module = importlib.import_module("api.call_model")
+    call_model_module = importlib.import_module("api.old_api.call_model")
     calls = []
     fake_response = SimpleNamespace(
         content=[
@@ -74,7 +74,7 @@ def test_call_model(monkeypatch):
 
 
 def test_call_model_passes_summary_model_pattern(monkeypatch):
-    call_model_module = importlib.import_module("api.call_model")
+    call_model_module = importlib.import_module("api.old_api.call_model")
     calls = []
     fake_response = SimpleNamespace(content=[])
     model_config = {
@@ -115,7 +115,7 @@ def test_call_model_passes_summary_model_pattern(monkeypatch):
 
 
 def test_get_model_config_uses_current_config():
-    call_model_module = importlib.import_module("api.call_model")
+    call_model_module = importlib.import_module("api.old_api.call_model")
 
     try:
         call_model_module.config.configure([
@@ -134,7 +134,7 @@ def test_get_model_config_uses_current_config():
 
 
 def test_call_model_routes_openai(monkeypatch):
-    call_model_module = importlib.import_module("api.call_model")
+    call_model_module = importlib.import_module("api.old_api.call_model")
     calls = []
     fake_response = SimpleNamespace(content=[])
     model_config = {
@@ -184,7 +184,7 @@ def test_call_model_routes_openai(monkeypatch):
 
 
 def test_call_model_routes_gemini(monkeypatch):
-    call_model_module = importlib.import_module("api.call_model")
+    call_model_module = importlib.import_module("api.old_api.call_model")
     calls = []
     fake_response = SimpleNamespace(content=[])
     model_config = {
@@ -222,7 +222,7 @@ def test_call_model_routes_gemini(monkeypatch):
 
 
 def test_call_model_routes_langchain(monkeypatch):
-    call_model_module = importlib.import_module("api.call_model")
+    call_model_module = importlib.import_module("api.old_api.call_model")
     calls = []
     fake_response = SimpleNamespace(content=[])
     model_config = {

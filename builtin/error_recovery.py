@@ -67,8 +67,72 @@ def retry_delay(attempt, retry_after=None):
 # 重试装饰器
 # 瞬态错误使用指数退避（429/529）。
 # 非瞬态错误会重新抛出给外部处理程序。
+def with_llm_retry(fn, state, RunPolicy):
+    """ 执行 ``fn``，并处理限流和过载这类瞬态错误。
+
+    限流错误通过异常类名中的 ``RateLimit`` 或异常消息中的 ``429`` 识别。
+    过载错误通过异常类名中的 ``Overloaded``，或异常消息中的 ``529`` /
+    ``overloaded`` 识别。其他异常会立即重新抛出。
+
+    连续过载达到阈值后，如果配置了 fallback 模型，会把 ``state.current_model``
+    切换为该模型。
+    """
+
+    for attempt in range(MAX_RETRIES):
+        # 尝试执行函数
+        try:
+            result = fn()
+            state.consecutive_529 = 0
+            return result
+        except Exception as e:
+            name = type(e).__name__
+            msg = str(e).lower()
+
+            # 处理 429 限流错误
+            if "ratelimit" in name.lower() or "429" in msg:
+                delay = retry_delay(attempt)
+                print(
+                    f"  \033[33m[429 rate limit] retry {attempt + 1}/{MAX_RETRIES} "
+                    f"wait {delay:.1f}s\033[0m"
+                )
+                time.sleep(delay)
+                continue
+
+            # 处理 529 过载错误
+            if "overloaded" in name.lower() or "529" in msg or "overloaded" in msg:
+                state.consecutive_529 += 1
+                if state.consecutive_529 >= MAX_CONSECUTIVE_529:
+                    if RunPolicy.fallback_model:
+                        state.current_model = dict(RunPolicy.fallback_model)
+                        state.consecutive_529 = 0
+                        print(
+                            f"  \033[33m[529 x{MAX_CONSECUTIVE_529}] "
+                            f"switching to fallback model "
+                            f"{RunPolicy.fallback_model['model_name']} and retrying\033[0m"
+                        )
+                    else:
+                        state.consecutive_529 = 0
+                        print(
+                            f"  \033[33m[529 x{MAX_CONSECUTIVE_529}] "
+                            "no fallback model configured; retrying\033[0m"
+                        )
+                delay = retry_delay(attempt)
+                print(
+                    f"  \033[33m[529 overloaded] retry {attempt + 1}/{MAX_RETRIES} "
+                    f"wait {delay:.1f}s\033[0m"
+                )
+                time.sleep(delay)
+                continue
+
+            raise
+    raise RuntimeError(f"Exceeded max retry attempts ({MAX_RETRIES}) without success.")
+
+
+# 重试装饰器
+# 瞬态错误使用指数退避（429/529）。
+# 非瞬态错误会重新抛出给外部处理程序。
 def with_retry(fn, state: RecoveryState):
-    """执行 ``fn``，并处理限流和过载这类瞬态错误。
+    """执行 ``fn``，并处理限流和过载这类瞬态错误。（旧版）
 
     限流错误通过异常类名中的 ``RateLimit`` 或异常消息中的 ``429`` 识别。
     过载错误通过异常类名中的 ``Overloaded``，或异常消息中的 ``529`` /
@@ -138,14 +202,45 @@ def is_prompt_too_long_error(e: Exception) -> bool:
         or "prompt is too long" in msg
         or "context_length_exceeded" in msg
         or "max_context_window" in msg
+        or "exceed_context_size" in msg
     )
 
 
 # ----------------------- 输出截断处理 -----------------------
 
 # Path 1: 输出截断恢复：提升 max_tokens 大小，或追加续写提示继续恢复
-def max_tokens_too_long_error(messages: list, state: RecoveryState):
+def output_tokens_too_long_error(messages: list, state):
     """处理输出被截断的情况：先升级一次输出预算，然后追加续写提示。
+
+    第一次调用只把状态标记为已升级，方便调用方提高输出 token 预算。后续调用会
+    追加续写提示，直到达到 ``MAX_RECOVERY_RETRIES``。
+    """
+
+    # 如果未升级到应急状态，则先升级到应急状态（提高 max_tokens 大小）。
+    if not state.max_output_tokens_override:
+        state.max_output_tokens_override = True
+        print(
+            "  \033[33m[max_tokens] escalating output budget "
+            f"{default_content_length['MAIN_OUTPUT_TOKENS']} -> "
+            f"{default_content_length['ESCALATED_MAX_OUTPUT_TOKENS']}\033[0m"
+        )
+        return state, messages
+
+    # 如果未超过最大恢复次数，则继续恢复。
+    if state.recovery_count < MAX_RECOVERY_RETRIES:
+        messages.append({"role": "user", "content": CONTINUATION_PROMPT})
+        state.recovery_count += 1
+        print(f"  \033[33m[max_tokens] continuing {state.recovery_count}/{MAX_RECOVERY_RETRIES}\033[0m")
+        return state, messages
+
+    # 如果已超过最大恢复次数，则提示用户。
+    print("  \033[31m[max_tokens] reached max recovery attempts.\033[0m")
+    return state, messages
+
+
+# Path 1: 输出截断恢复：提升 max_tokens 大小，或追加续写提示继续恢复
+def max_tokens_too_long_error(messages: list, state: RecoveryState):
+    """处理输出被截断的情况：先升级一次输出预算，然后追加续写提示。（旧版）
 
     第一次调用只把状态标记为已升级，方便调用方提高输出 token 预算。后续调用会
     追加续写提示，直到达到 ``MAX_RECOVERY_RETRIES``。

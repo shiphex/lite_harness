@@ -9,6 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from builtin import error_recovery
+from core.runtime import RunPolicy, state
 
 
 class RateLimitError(Exception):
@@ -91,12 +92,70 @@ def test_with_retry_raises_when_retries_are_exhausted(monkeypatch):
         error_recovery.with_retry(lambda: (_ for _ in ()).throw(RateLimitError("429")), state)
 
 
+def test_with_llm_retry_supports_runtime_state():
+    current_state = state(
+        consecutive_529=0,
+        current_model={"model_name": "primary"},
+    )
+    policy = RunPolicy(
+        fallback_model={"model_name": "fallback", "api": "fake"}
+    )
+
+    assert error_recovery.with_llm_retry(lambda: "ok", current_state, policy) == "ok"
+    assert current_state.consecutive_529 == 0
+    assert current_state.current_model == {"model_name": "primary"}
+
+
+def test_with_llm_retry_switches_runtime_state_to_fallback(monkeypatch):
+    current_state = state(
+        consecutive_529=0,
+        current_model={"model_name": "primary"},
+    )
+    policy = RunPolicy(
+        fallback_model={"model_name": "fallback", "api": "fake"}
+    )
+    calls = []
+
+    monkeypatch.setattr(error_recovery, "MAX_RETRIES", 4)
+    monkeypatch.setattr(error_recovery, "MAX_CONSECUTIVE_529", 2)
+    monkeypatch.setattr(error_recovery, "retry_delay", lambda attempt: 0)
+    monkeypatch.setattr(error_recovery.time, "sleep", lambda delay: None)
+
+    def overloaded_then_success():
+        calls.append("call")
+        if len(calls) <= 2:
+            raise OverloadedError("server overloaded")
+        return "ok"
+
+    assert error_recovery.with_llm_retry(overloaded_then_success, current_state, policy) == "ok"
+    assert current_state.current_model == policy.fallback_model
+    assert current_state.consecutive_529 == 0
+
+
+def test_output_tokens_recovery_supports_runtime_state():
+    current_state = state(
+        max_output_tokens_override=False,
+        recovery_count=0,
+    )
+    messages = [{"role": "user", "content": "start"}]
+
+    returned_state, returned_messages = error_recovery.output_tokens_too_long_error(
+        messages,
+        current_state,
+    )
+
+    assert returned_state is current_state
+    assert returned_messages is messages
+    assert current_state.max_output_tokens_override is True
+
+
 @pytest.mark.parametrize(
     "message",
     [
         "prompt is too long",
         "context_length_exceeded",
         "max_context_window reached",
+        "exceed_context_size: request exceeds the available context size",
         "The PROMPT became LONG after tool output",
     ],
 )

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-import api.openai_api as openai_api
+import api.old_api.openai_api as openai_api
 
 
 def test_call_openai_model_passes_request(monkeypatch):

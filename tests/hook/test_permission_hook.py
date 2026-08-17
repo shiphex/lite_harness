@@ -1,35 +1,34 @@
+from types import SimpleNamespace
+
+from hook.hook_handler import HookAction
 from hook.permission_hook import permission_hook
 
 
-def test_permission_hook(monkeypatch):
-    
-    # 1. 测试指令在拒绝列表中的情况
-    from types import SimpleNamespace
-    block = SimpleNamespace(
-        name = "powershell",
-        input = {"command": "rm -rf /"},
-    )
-
-    result = permission_hook(block)
-    assert result == "权限已被拒绝列表拒绝"
+def block(command, *, name="powershell"):
+    return SimpleNamespace(name=name, input={"command": command})
 
 
-    # 2. 测试指令不在拒绝列表中，但 rules 中有拒绝指令，用户拒绝执行
-    block = SimpleNamespace(
-        name = "powershell",
-        input = {"command": "rm test.txt"},
-    )
-    monkeypatch.setattr('builtins.input', lambda _: "N")
-    result = permission_hook(block)
-    assert result == "权限已被用户拒绝"
+def test_permission_hook_blocks_deny_list_command():
+    result = permission_hook(None, block("rm -rf /"))
+
+    assert result.action == HookAction.BLOCK
+    assert result.blocked is True
+    assert result.approval_required is False
+    assert "拒绝列表" in result.message
 
 
+def test_permission_hook_asks_for_dangerous_command():
+    result = permission_hook(None, block("Remove-Item test.py"))
 
-    # 3. 测试指令不在拒绝列表中，但 rules 中有拒绝指令，用户选择执行
-    block = SimpleNamespace(
-        name = "powershell",
-        input = {"command": "rm test.txt"},
-    )
-    monkeypatch.setattr('builtins.input', lambda _: "Y")
-    result = permission_hook(block)
-    assert result is None
+    assert result.action == HookAction.ASK
+    assert result.blocked is False
+    assert result.approval_required is True
+    assert "潜在破坏性指令" in result.message
+
+
+def test_permission_hook_allows_safe_command():
+    result = permission_hook(None, block("Get-ChildItem"))
+
+    assert result.action == HookAction.CONTINUE
+    assert result.blocked is False
+    assert result.approval_required is False
