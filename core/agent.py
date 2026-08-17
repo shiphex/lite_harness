@@ -16,9 +16,13 @@ import hook
 import builtin
 import tools
 import config
+import event
 from .loop import query_loop
 from .runtime import RunPolicy, state, RuntimeFactory
 from builtin.memory import MemoryPolicy, MemoryMode
+from cli.event_sink import CliEventSink
+from cli.cli_interaction import CliInteraction
+from event.interaction import ApprovalRequest
 
 
 
@@ -72,6 +76,8 @@ def create_master_runtime(history: List, context: Dict):
         memory_policy = memoryPolicy,
         workspace = config.Config().get_path_config("project_path"),
         session_id = None,
+        events = CliEventSink(),
+        interaction = CliInteraction(),
     )
     
     return runtime
@@ -91,9 +97,7 @@ def master_agent():
     Raises:
         None
     """
-    # 告知用户系统信息
-    cli.inform_system_info("输入问题，回车发送。输入 q 退出。")
-    
+
     # 初始化历史记录
     history = []
     # 初始化上下文
@@ -101,10 +105,20 @@ def master_agent():
 
     runtime = create_master_runtime(history, context)
 
+    # 告知用户系统信息
+    runtime.events.emit(
+        event.make_event(
+                runtime,
+                event.EventType.SYSTEM_MESSAGE,
+                trigger="输入问题，回车发送。输入 q 退出。",
+            )
+    )
+
     while True:
         # 获取用户输入
         try:
-            user_input = cli.get_user_input()
+            user_input = runtime.interaction.get_user_input()
+            
         except (EOFError, KeyboardInterrupt):
             break
         if user_input.strip().lower() in ("q", "exit", " "):
@@ -143,5 +157,17 @@ def master_agent():
                 if block_type == "text":
                     # 执行系统输出
                     text = block.get("text", "") if isinstance(block, dict) else block.text
-                    cli.put_agent_output(text)
-                    cli.put_agent_other_info(f"当前状态：{status}")
+                    runtime.events.emit(
+                        event.make_event(
+                            runtime,
+                            event.EventType.ASSISTANT_MESSAGE,
+                            text = text,
+                        )
+                    )
+                    runtime.events.emit(
+                        event.make_event(
+                            runtime,
+                            event.EventType.RUN_COMPLETED,
+                            trigger=f"当前状态：{status}",
+                        )
+                    )

@@ -12,6 +12,11 @@ class CliEventSink:
     def emit(self, event: Event) -> None:
 
         match event.type:
+            case EventType.SYSTEM_MESSAGE:
+                cli.inform_system_info(
+                    event.data["trigger"]
+                )
+
             case EventType.ASSISTANT_MESSAGE:
                 cli.put_agent_output(
                     event.data["text"]

@@ -1,6 +1,6 @@
 """ 定义 agent 运行时的结构 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import List, Dict
 from pathlib import Path
 from uuid import uuid4
@@ -11,9 +11,7 @@ from tools.tool_handler import ToolExecutor
 from builtin.load_prompt import PromptBuilder
 from hook.hook_handler import HookManager, create_default_hooks
 from event.sink import EventSink, NullEventSink
-from cli.event_sink import CliEventSink
 from event.interaction import Interaction, NonInteractiveInteraction
-from cli.cli_interaction import CliInteraction
 
 
 
@@ -146,8 +144,8 @@ class RuntimeFactory:
         workspace: Path,
         session_id: str | None = None,
         hooks: HookManager | None = None,
-        events = CliEventSink(),
-        interaction = CliInteraction(),
+        events: EventSink | None = None,
+        interaction: Interaction | None = None,
     ) -> AgentRuntime:
 
         session_id = session_id or uuid4().hex[:8]
@@ -175,9 +173,11 @@ class RuntimeFactory:
             transcript_dir = paths.transcript_dir,
         )
 
-        hooks = hooks or create_default_hooks()
+        if hooks is None:
+            hooks = create_default_hooks()
 
-        events = events or NullEventSink()
+        if events is None:
+            events = NullEventSink()
 
         tools = ToolExecutor(
             registry = policy.tool_handler,
@@ -185,10 +185,8 @@ class RuntimeFactory:
             workspace = workspace,
         )
 
-        interaction = (
-            interaction
-            or NonInteractiveInteraction()
-        )
+        if interaction is None:
+            interaction = NonInteractiveInteraction()
         
         return AgentRuntime(
             session_id = session_id,

@@ -9,9 +9,18 @@ class CliInteraction:
     """ CLI 交互类。定义了与用户交互的接口。
     
     Methods:
+        get_user_input: 获取用户输入。
         request_approval: 请求用户确认工具调用。
     
     """
+    def get_user_input(
+        self,
+        message: str = ">> ",
+    ) -> str:
+        """ 获取用户输入。"""
+        return cli.get_user_input(message)
+
+
     def request_approval(
         self,
         request: ApprovalRequest,

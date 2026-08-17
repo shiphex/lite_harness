@@ -31,6 +31,9 @@ class EventType(StrEnum):
         - `approval.resolved`：审批解决
         - `error`：错误
     """
+    # system
+    SYSTEM_MESSAGE = "system.message"
+
     # run lifecycle
     RUN_STARTED = "run.started"
     RUN_COMPLETED = "run.completed"

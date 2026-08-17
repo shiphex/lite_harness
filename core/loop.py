@@ -37,6 +37,14 @@ def compact_pipeline(runtime: AgentRuntime):
                     {"role": m.get("role", ""), "content": m.get("content", "")}
                     for m in messages]
 
+    runtime.events.emit(
+                        event.make_event(
+                            runtime,
+                            event.EventType.COMPACT_STARTED,
+                            trigger="auto start compact.",
+                        )
+                    )
+
     # 执行压缩管线
     messages[:] = tools.tool_result_budget(             # L3 储存大的工具调用输出结果
         messages,
@@ -47,14 +55,15 @@ def compact_pipeline(runtime: AgentRuntime):
     # 若压缩后历史记录超过上下文大小，执行紧凑式压缩
     CONTEXT_LIMIT = 50000
     if tools.estimate_size(messages) > CONTEXT_LIMIT:
-        runtime.events.emit(
-             event.make_event(
-                runtime,
-                event.EventType.COMPACT_STARTED,
-                trigger="auto",
-            )
-        )
         messages[:] = tools.compact_history(messages, runtime.artifacts)
+
+    runtime.events.emit(
+                        event.make_event(
+                            runtime,
+                             event.EventType.COMPACT_COMPLETED,
+                            trigger="auto complete compact.",
+                        )
+                    )
 
     return pre_compress, messages
 
@@ -309,8 +318,22 @@ def query_loop(runtime: AgentRuntime):
         if max_turns > 0:
             if state.turn_count >= max_turns:
                 state.messages = messages
+                runtime.events.emit(
+                    event.make_event(
+                        runtime,
+                        event.EventType.RUN_COMPLETED,
+                        trigger=f"max_turns {max_turns} reached",
+                    )
+                )
                 return state, {"reason": "max_turns"}
             state.turn_count = state.turn_count + 1
+            runtime.events.emit(
+                event.make_event(
+                    runtime,
+                    event.EventType.TURN_STARTED,
+                    trigger=f"turn {state.turn_count} started",
+                )
+            )
 
         system = runtime.prompt.build(runtime)
         context = state.context
@@ -346,7 +369,7 @@ def query_loop(runtime: AgentRuntime):
                     runtime.events.emit(
                          event.make_event(
                             runtime,
-                             event.EventType.COMPACT_STARTED,
+                            event.EventType.COMPACT_STARTED,
                             trigger="prompt_too_long",
                         )
                     )
@@ -367,6 +390,13 @@ def query_loop(runtime: AgentRuntime):
                      "text": "[Error] 上下文过大，无法继续。"}]})
                 state.messages = messages
                 state.context = context
+                runtime.events.emit(
+                    event.make_event(
+                        runtime,
+                        event.EventType.RUN_COMPLETED,
+                        trigger="prompt_too_long",
+                    )
+                )
                 return state, {"reason": "prompt_too_long"}
             raise
 
@@ -376,6 +406,13 @@ def query_loop(runtime: AgentRuntime):
             if state.recovery_count >= builtin.MAX_RECOVERY_RETRIES:
                 state.messages = messages
                 state.context = context
+                runtime.events.emit(
+                    event.make_event(
+                        runtime,
+                        event.EventType.RUN_COMPLETED,
+                        trigger="prompt_too_long",
+                    )
+                )
                 return state, {"reason": "prompt_too_long"}
             if state.max_output_tokens_override and state.recovery_count < builtin.MAX_RECOVERY_RETRIES:
                 state.max_output_tokens = int(state.max_output_tokens * 2)
@@ -407,6 +444,13 @@ def query_loop(runtime: AgentRuntime):
             
             state.messages = messages
             state.context = context
+            runtime.events.emit(
+                event.make_event(
+                    runtime,
+                    event.EventType.RUN_COMPLETED,
+                    trigger="run completed",
+                )
+            )
             return state, {"reason": "completed"}               # return Terminal — 唯一的退出点
 
         # 6. 收集 tool_use 块
