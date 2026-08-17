@@ -36,9 +36,13 @@ class CliInteraction:
             f"({request.arguments})"
         )
 
-        choice = cli.get_user_input(
-            "\n    是否继续？(y/N): "
-        ).strip().lower()
+        try:
+            choice = cli.get_user_input("\n 是否继续？(y/N): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return ApprovalResponse(
+                                    approved=False,
+                                    message="审批输入被中断",
+                   )
 
         return ApprovalResponse(
             approved=choice in ("y", "yes"),

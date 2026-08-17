@@ -13,7 +13,7 @@ class ApprovalRequest:
 @dataclass(slots=True, frozen=True)
 class ApprovalResponse:
     approved: bool
-    # message: str | None = None
+    message: str | None = None
 
 
 class Interaction(Protocol):
