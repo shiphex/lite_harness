@@ -164,10 +164,3 @@ def master_agent():
                             text = text,
                         )
                     )
-                    runtime.events.emit(
-                        event.make_event(
-                            runtime,
-                            event.EventType.RUN_COMPLETED,
-                            trigger=f"当前状态：{status}",
-                        )
-                    )

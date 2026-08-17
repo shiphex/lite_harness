@@ -18,6 +18,9 @@ class ApprovalResponse:
 
 class Interaction(Protocol):
 
+    def get_user_input(self) -> str:
+        ...
+
     def request_approval(
         self,
         request: ApprovalRequest,
@@ -34,4 +37,8 @@ class NonInteractiveInteraction:
 
         return ApprovalResponse(
             approved=False,
+            message="当前 Runtime 不支持交互式审批",
         )
+
+    def get_user_input(self) -> str:
+        raise EOFError

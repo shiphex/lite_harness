@@ -180,6 +180,13 @@ def _handle_pre_tool_hook_result(
             )
 
         case hook.HookAction.ASK:
+            if not runtime.policy.can_ask_user:
+                return _blocked_tool_result(
+                    runtime,
+                    block,
+                    "当前 Agent 不允许请求用户审批",
+                )
+
             request = ApprovalRequest(
                 tool_call_id=block.id,
                 tool_name=block.name,
@@ -213,6 +220,7 @@ def _handle_pre_tool_hook_result(
                     tool_call_id=block.id,
                     tool_name=block.name,
                     approved=approval.approved,
+                    message=approval.message,
                 )
             )
 
@@ -263,32 +271,33 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
             )
         )
 
-        runtime.events.emit(
-            event.make_event(
-                runtime,
-                event.EventType.COMPACT_STARTED,
-                trigger="use compact tool.",
-            )
-        )
-
         # 对调用了压缩工具进行处理
         if block.name == "compact":
+            runtime.events.emit(
+                event.make_event(
+                    runtime,
+                    event.EventType.COMPACT_STARTED,
+                    trigger="use compact tool.",
+                )
+            )
+
             messages[:] = tools.compact_history(messages, runtime.artifacts,)
             results.append({
                 "type": "tool_result",
                 "tool_use_id": block.id,
                 "content": "[已压缩： 对话历史已生成摘要。]",
             })
+
+            runtime.events.emit(
+                event.make_event(
+                    runtime,
+                    event.EventType.COMPACT_COMPLETED,
+                    trigger="complete compact tool.",
+                )
+            )
+
             status = "compact"
             return results, status
-
-        runtime.events.emit(
-            event.make_event(
-                runtime,
-                event.EventType.COMPACT_COMPLETED,
-                trigger="complete compact tool.",
-            )
-        )
 
         # 在执行之前，触发 PreToolUse hook
         hook_ctx = hook.make_hook_context(runtime)
@@ -367,6 +376,13 @@ def query_loop(runtime: AgentRuntime):
     Raises:
         None
     """
+
+    runtime.events.emit(
+        event.make_event(
+            runtime,
+            event.EventType.RUN_STARTED,
+        )
+    )
     
     # 0. 解析权限、状态参数
     state = runtime.state
@@ -441,6 +457,13 @@ def query_loop(runtime: AgentRuntime):
                     )
                     messages[:] = tools.reactive_compact(messages, runtime.artifacts)
                     state.has_attempted_reactive_compact = True
+                    runtime.events.emit(
+                        event.make_event(
+                            runtime,
+                            event.EventType.COMPACT_COMPLETED,
+                            trigger="complete compact.",
+                        )
+                    )
                     continue                # Continue Site 2: Prompt Too Long
                 runtime.events.emit(
                      event.make_event(
