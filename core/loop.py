@@ -18,6 +18,8 @@ from api.contract import ModelRequest, ModelResponse
 from .runtime import AgentRuntime
 from event.interaction import ApprovalRequest
 
+from typing import Any
+
 
 def compact_pipeline(runtime: AgentRuntime):
     """ 执行压缩管线，压缩会话历史记录。
@@ -114,6 +116,122 @@ def struct_massages(messages: list, memories_content: str):
     return request_messages
 
 
+def _blocked_tool_result(
+    runtime: AgentRuntime,
+    block,
+    reason: str,
+) -> dict[str, Any]:
+    """ 重整工具调用结果，记录被阻塞的工具调用。
+
+    Args:
+        runtime (AgentRuntime): 运行时环境。
+        block (ToolUseBlock): 被阻塞的工具调用块。
+        reason (str): 阻塞原因。
+    
+    Returns:
+        dict[str, Any]: 包含被阻塞工具调用结果的字典。"""
+
+    # 记录工具调用被阻塞事件
+    runtime.events.emit(
+        event.make_event(
+            runtime,
+            event.EventType.TOOL_BLOCKED,
+            tool_call_id=block.id,
+            tool_name=block.name,
+            reason=reason,
+        )
+    )
+
+    return {
+        "type": "tool_result",
+        "tool_use_id": block.id,
+        "content": reason,
+    }
+
+
+def _handle_pre_tool_hook_result(
+    runtime: AgentRuntime,
+    block,
+    hook_result: hook.HookResult,
+) -> dict[str, Any] | None:
+    """ 处理 PreToolUse hook 结果。
+
+    处理拒绝的工具请求、需询问用户以决定的工具请求。
+    
+    Args:
+        runtime (AgentRuntime): 运行时环境。
+        block (ToolUseBlock): 被调用的工具调用块。
+        hook_result (hook.HookResult): PreToolUse hook 结果。
+    
+    Returns:
+        dict[str, Any] | None: 包含工具调用结果的字典，或 None。
+    """
+    match hook_result.action:
+        case hook.HookAction.CONTINUE:
+            return None
+
+        case hook.HookAction.BLOCK:
+            # 记录工具调用被阻塞事件
+            reason = hook_result.message or "Tool use blocked by hook."
+            return _blocked_tool_result(
+                runtime,
+                block,
+                reason,
+            )
+
+        case hook.HookAction.ASK:
+            request = ApprovalRequest(
+                tool_call_id=block.id,
+                tool_name=block.name,
+                arguments=block.input,
+                reason=(
+                    hook_result.message
+                    or "该操作需要用户批准"
+                ),
+            )
+        
+            runtime.events.emit(
+                event.make_event(
+                    runtime,
+                    event.EventType.APPROVAL_REQUESTED,
+                    tool_call_id=request.tool_call_id,
+                    tool_name=request.tool_name,
+                    arguments=request.arguments,
+                    reason=request.reason,
+                )
+            )
+        
+            approval = (
+                runtime.interaction
+                .request_approval(request)
+            )
+        
+            runtime.events.emit(
+                event.make_event(
+                    runtime,
+                    event.EventType.APPROVAL_RESOLVED,
+                    tool_call_id=block.id,
+                    tool_name=block.name,
+                    approved=approval.approved,
+                )
+            )
+
+            if approval.approved:
+                return None
+
+            reason = approval.message or "权限已被用户拒绝"
+            return _blocked_tool_result(
+                runtime,
+                block,
+                reason,
+            )
+
+        case _:
+            raise ValueError(
+                f"Unsupported HookAction: {hook_result.action!r}"
+            )
+
+
 def execute_tool(response: ModelResponse, runtime: AgentRuntime):
     """ 执行工具调用。
 
@@ -145,6 +263,14 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
             )
         )
 
+        runtime.events.emit(
+            event.make_event(
+                runtime,
+                event.EventType.COMPACT_STARTED,
+                trigger="use compact tool.",
+            )
+        )
+
         # 对调用了压缩工具进行处理
         if block.name == "compact":
             messages[:] = tools.compact_history(messages, runtime.artifacts,)
@@ -156,91 +282,31 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
             status = "compact"
             return results, status
 
+        runtime.events.emit(
+            event.make_event(
+                runtime,
+                event.EventType.COMPACT_COMPLETED,
+                trigger="complete compact tool.",
+            )
+        )
+
         # 在执行之前，触发 PreToolUse hook
         hook_ctx = hook.make_hook_context(runtime)
         hook_result = runtime.hooks.run(hook.HookEvent.PRE_TOOL_USE,
                                         hook_ctx,
                                         block,
                                         )
-        if hook_result.action == hook.HookAction.BLOCK:
-            # 记录工具调用被阻塞事件
-            runtime.events.emit(
-                event.make_event(
-                    runtime,
-                    event.EventType.TOOL_BLOCKED,
-                    tool_call_id=block.id,
-                    tool_name=block.name,
-                    reason=str(
-                        hook_result.message
-                        or "Tool use blocked by hook."
-                    ),
-                )
-            )
 
-            # 返回并记录 PreToolUse hook 的结果
-            results.append({"type": "tool_result", 
-                            "tool_use_id": block.id, 
-                            "content": str(hook_result.message or "Tool use blocked by hook.")})
+        # 工具执行前询问用户是否执行
+        terminal_result = _handle_pre_tool_hook_result(
+            runtime,
+            block,
+            hook_result,
+        )
+
+        if terminal_result is not None:
+            results.append(terminal_result)
             continue
-
-        if hook_result.action == hook.HookAction.ASK:
-            request = ApprovalRequest(
-                tool_call_id=block.id,
-                tool_name=block.name,
-                arguments=block.input,
-                reason=(
-                    hook_result.message
-                    or "该操作需要用户批准"
-                ),
-            )
-
-            runtime.events.emit(
-                event.make_event(
-                    runtime,
-                    event.EventType.APPROVAL_REQUESTED,
-                    tool_call_id=request.tool_call_id,
-                    tool_name=request.tool_name,
-                    arguments=request.arguments,
-                    reason=request.reason,
-                )
-            )
-
-            approval = (
-                runtime.interaction
-                .request_approval(request)
-            )
-
-            runtime.events.emit(
-                event.make_event(
-                    runtime,
-                    event.EventType.APPROVAL_RESOLVED,
-                    tool_call_id=block.id,
-                    tool_name=block.name,
-                    approved=approval.approved,
-                )
-            )
-
-            if not approval.approved:
-            
-                message = "权限已被用户拒绝"
-        
-                runtime.events.emit(
-                    event.make_event(
-                        runtime,
-                        event.EventType.TOOL_BLOCKED,
-                        tool_call_id=block.id,
-                        tool_name=block.name,
-                        reason=message,
-                    )
-                )
-        
-                results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": message,
-                })
-        
-                continue
 
         # 记录工具调用开始事件
         runtime.events.emit(
