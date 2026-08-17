@@ -272,6 +272,8 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
         )
 
         # 对调用了压缩工具进行处理
+            # `compact` 是一个内部控制操作，而不是一个普通的执行工具。
+            # 它会有意绕过 PreToolUse/PostToolUse 和 ToolExecutor。
         if block.name == "compact":
             runtime.events.emit(
                 event.make_event(

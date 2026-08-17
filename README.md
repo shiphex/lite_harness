@@ -80,6 +80,8 @@ lite_harness/
 ## 4. 架构文档
 
 - [Architecture Principles](doc/architecture/principles.md)：项目架构原则。
+- [Agent](doc/architecture/agent.md)：Agent 顶层入口、输入循环和输出处理。
+- [Agent Loop](doc/architecture/agent_loop.md)：query loop、工具调用和压缩生命周期。
 - [Runtime](doc/architecture/runtime.md)：Runtime、RunPolicy、state 和组件组装。
 - [Event](doc/architecture/event.md)：事件类型、EventSink 和事件顺序。
 - [Hook](doc/architecture/hook.md)：HookManager、权限检查和 Hook 生命周期。
