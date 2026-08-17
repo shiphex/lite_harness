@@ -62,7 +62,7 @@ class EventType(StrEnum):
     ERROR = "error"
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class Event:
     """ 事件定义 
     

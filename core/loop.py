@@ -245,7 +245,7 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
 
     # 初始化模型输出储存列表
     results = []
-    status = ""
+    status = "complete"
     # 6. 收集 tool_use 块
     for block in response.content:
         if block.type != "tool_use":

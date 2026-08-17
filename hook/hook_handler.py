@@ -42,8 +42,8 @@ class HookAction(StrEnum):
     
     Attributes:
         CONTINUE: 继续执行后续 hook。
-        BLOCK: 停止后续 hook 执行。
-        ASK: 请求用户确认后续 hook。
+        BLOCK:  停止 hook chain，并阻止后续动作。
+        ASK: 停止 hook chain，并要求调用方进入 approval flow。
     """
     CONTINUE = "continue"
     BLOCK = "block"
