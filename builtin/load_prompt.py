@@ -12,7 +12,6 @@ Typical usage example:
 
 import json
 import config
-import cli
 from pathlib import Path
 from observability.logger import get_logger
 logger = get_logger(__name__)
@@ -187,8 +186,7 @@ def get_system_prompt(self, runtime, context: dict) -> str:
         default=str,
     )
     if key == self._last_context_key and self._last_prompt:
-        logger.debug("calling model session=%s agent=%s turn=%d",
-                     "  \033[90m[cache init]系统提示词未变化\033[0m",
+        logger.debug("calling model session=%s agent=%s turn=%d \033[90m[cache init]系统提示词未变化\033[0m",
                          runtime.session_id,
                          runtime.agent_id,
                          runtime.state.turn_count,)
@@ -202,8 +200,7 @@ def get_system_prompt(self, runtime, context: dict) -> str:
     loaded = ["identity", "tools", "workspace"]
     if context.get("memories"):
         loaded.append("memory")
-    logger.debug("calling model session=%s agent=%s turn=%d",
-                 "system prompt assembled: sections=%s",
+    logger.debug("calling model session=%s agent=%s turn=%d system prompt assembled: sections=%s",
                  runtime.session_id,
                  runtime.agent_id,
                  runtime.state.turn_count,

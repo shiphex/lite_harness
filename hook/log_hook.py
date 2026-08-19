@@ -7,7 +7,6 @@ Typical usage example:
     hook.trigger_hooks("PreToolUse", block, output)
 """
 
-import cli
 from observability.logger import get_logger
 logger = get_logger(__name__)
 

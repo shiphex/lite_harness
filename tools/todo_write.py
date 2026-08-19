@@ -12,10 +12,8 @@ Typical usage example:
 
 import ast
 import json
-import cli
 from .tool_class import ToolContext
 import event
-from .tool_class import ToolContext
 
 
 # reminder 机制

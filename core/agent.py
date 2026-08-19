@@ -8,10 +8,8 @@ Typical usage example:
     agent()
 """
 
-from dataclasses import dataclass, field, asdict
 from typing import List, Dict
 
-import cli
 import hook
 import builtin
 import tools
@@ -22,7 +20,6 @@ from .runtime import RunPolicy, state, RuntimeFactory
 from builtin.memory import MemoryPolicy, MemoryMode
 from cli.event_sink import CliEventSink
 from cli.cli_interaction import CliInteraction
-from event.interaction import ApprovalRequest
 
 
 

@@ -11,15 +11,13 @@ import time
 import yaml
 import re
 import json
-import api
-import cli
 import config
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
 from api.adapter_factory import create_adapter
-from api.contract import ModelRequest, ModelResponse
+from api.contract import ModelRequest
 
 from observability.logger import get_logger
 logger = get_logger(__name__)
@@ -438,8 +436,7 @@ def extract_memories(self, runtime, messages: list):
 
         # 解析 JSON，排除空文本段
         if not match:
-            logger.debug("calling model session=%s agent=%s turn=%d",
-                         "[Memory: 提取失败] 模型未返回 JSON 数组",
+            logger.debug("calling model session=%s agent=%s turn=%d [Memory: 提取失败] 模型未返回 JSON 数组",
                          runtime.session_id,
                          runtime.agent_id,
                          runtime.state.turn_count,
@@ -459,8 +456,7 @@ def extract_memories(self, runtime, messages: list):
                 write_memory_file(self, name, mem_type, desc, body)
                 count += 1
         if count:
-            logger.debug("calling model session=%s agent=%s turn=%d",
-             "[Memory: 提取成功] 成功提取 %d 条新记忆",
+            logger.debug("calling model session=%s agent=%s turn=%d [Memory: 提取成功] 成功提取 %d 条新记忆",
              runtime.session_id,
              runtime.agent_id,
              runtime.state.turn_count,
@@ -469,8 +465,7 @@ def extract_memories(self, runtime, messages: list):
             return True
         return False
     except Exception as e:
-        logger.debug("calling model session=%s agent=%s turn=%d",
-             "[Memory: 提取失败] %s",
+        logger.debug("calling model session=%s agent=%s turn=%d [Memory: 提取失败] %s",
              runtime.session_id,
              runtime.agent_id,
              runtime.state.turn_count,
@@ -549,8 +544,7 @@ def consolidate_memories(self, runtime):
             if desc and body:
                 write_memory_file(self, name, mem_type, desc, body)
 
-        logger.debug("calling model session=%s agent=%s turn=%d",
-                     f"\n[Memory: 成功整理 {len(files)} → {len(items)} 条记忆]",
+        logger.debug("calling model session=%s agent=%s turn=%d \n[Memory: 成功整理 {len(files)} → {len(items)} 条记忆]",
                      runtime.session_id,
                      runtime.agent_id,
                      runtime.state.turn_count,
@@ -558,8 +552,7 @@ def consolidate_memories(self, runtime):
         return True
 
     except Exception as e:
-        logger.debug("calling model session=%s agent=%s turn=%d",
-                     f"\n[Memory: 整理失败] {e}",
+        logger.debug("calling model session=%s agent=%s turn=%d \n[Memory: 整理失败] %s",
                      runtime.session_id,
                      runtime.agent_id,
                      runtime.state.turn_count,
