@@ -4,7 +4,6 @@ from observability.logger import configure_logging
 
 
 def main():
-    from core import agent
     from core import master_agent
 
     print("Hello from lite_harness!")

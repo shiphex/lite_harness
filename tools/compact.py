@@ -15,7 +15,6 @@ import config
 import api
 
 from builtin.artifacts import ArtifactStore, persist_large_output, write_transcript
-from .tool_class import ToolContext
 
 # 内容长度参数
 content_length = config.Config().get_content_length()
@@ -359,4 +358,3 @@ def reactive_compact(messages, artifacts: ArtifactStore):
 
     return [{"role": "user", "content": f"[重新执行压缩]\n\n{summary}"}, *messages[tail_start:]]
 
-    

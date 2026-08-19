@@ -118,7 +118,8 @@ def master_agent():
             
         except (EOFError, KeyboardInterrupt):
             break
-        if user_input.strip().lower() in ("q", "exit", " "):
+        normalized_input = user_input.strip().lower()
+        if not normalized_input or normalized_input in ("q", "exit"):
             break
         
         # 执行 UserPromptSubmit hook

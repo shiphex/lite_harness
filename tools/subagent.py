@@ -92,7 +92,11 @@ def spawn_subagent(context: ToolContext, description: str) -> str:
                 # 获取返回的需调用工具的名字，再从 STANDARD_TOOLS_HANDLERS 中获取对应的函数指针
                 handler = tool_handler.STANDARD_TOOLS_HANDLERS.get(block.name)
                 # 将 block.input 的值作为参数传递给 handler 指向的函数，并返回函数执行结果   
-                output = handler(**block.input) if handler else f"Unknown: {block.name}"
+                output = (
+                    handler(context, **block.input)
+                    if handler
+                    else f"Unknown: {block.name}"
+                )
 
                 # 触发 PostToolUse hook
                 hook.trigger_hooks("PostToolUse", block, output)
