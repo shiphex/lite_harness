@@ -10,6 +10,8 @@
 
 
 import cli
+from observability.logger import get_logger
+logger = get_logger(__name__)
 
 
 def summary_hook(ctx, message: list):
@@ -27,5 +29,7 @@ def summary_hook(ctx, message: list):
     tool_count = sum(1 for m in message 
                      for b in (m.get("content") if isinstance(m.get("content"), list) else [])
                      if isinstance(b, dict) and b.get("type") == "tool_result")
-    cli.put_agent_other_info(f"[HOOK] Stop: session used {tool_count} tool calls.")
+    logger.debug(
+        f"[HOOK] Stop: session used {tool_count} tool calls."
+        )
     return None

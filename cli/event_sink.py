@@ -36,6 +36,11 @@ class CliEventSink:
                 cli.put_agent_other_info(
                     f"[BLOCKED]: {reason}"
                 )
+
+            case EventType.TODO_UPDATED:
+                cli.put_agent_output(
+                    event.data["text"]
+                )
                 
             case EventType.COMPACT_STARTED:
                 cli.put_agent_other_info(

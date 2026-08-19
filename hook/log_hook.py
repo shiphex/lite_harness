@@ -8,6 +8,8 @@ Typical usage example:
 """
 
 import cli
+from observability.logger import get_logger
+logger = get_logger(__name__)
 
 
 def log_hook(ctx, block):
@@ -22,5 +24,7 @@ def log_hook(ctx, block):
         None
     """
     args_preview = str(list(block.input.values())[:2])[:60]
-    cli.put_agent_other_info(f"[HOOK] {block.name}({args_preview})")
+    logger.info(
+        f"[HOOK] {block.name}({args_preview})"
+    )
     return None

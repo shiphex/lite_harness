@@ -9,6 +9,8 @@
 
 import config
 import cli
+from observability.logger import get_logger
+logger = get_logger(__name__)
 
 
 def context_inject_hook(ctx, query: str):
@@ -21,5 +23,7 @@ def context_inject_hook(ctx, query: str):
     
     """
     WORKDIR = config.Config().get_path_config("project_path")
-    cli.put_agent_other_info(f"[HOOK] UserPromptSubmit: working in {WORKDIR}")
+    logger.debug(
+        f"[HOOK] UserPromptSubmit: {query}, working in {WORKDIR}"
+    )
     return None

@@ -14,6 +14,8 @@ import ast
 import json
 import cli
 from .tool_class import ToolContext
+import event
+from .tool_class import ToolContext
 
 
 # reminder 机制
@@ -89,6 +91,13 @@ def run_todo_write(context: ToolContext, todos: list) -> str:
     for t in CURRENT_TODOS:
         icon = {"pending": " ", "in_progress": "\033[36m▸\033[0m", "completed": "\033[32m✓\033[0m"}[t["status"]]   # 把整个大字典写在方括号前面，直接根据键取值
         lines.append(f"    [{icon}] {t['content']}")
-    cli.put_agent_output("\n".join(lines))     # 打印格式化后的任务列表，在每个任务间添加换行符
+   # 打印格式化后的任务列表，在每个任务间添加换行符
+    context.runtime.events.emit(
+        event.make_event(
+            context.runtime,
+            event.EventType.TODO_UPDATED,
+            text = "\n".join(lines),
+        )
+    )
 
     return f"更新 {len(CURRENT_TODOS)} 个任务。"

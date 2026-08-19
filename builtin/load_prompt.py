@@ -14,6 +14,8 @@ import json
 import config
 import cli
 from pathlib import Path
+from observability.logger import get_logger
+logger = get_logger(__name__)
 
 try:
     from tools.load_skill import SKILL_REGISTRY
@@ -185,7 +187,11 @@ def get_system_prompt(self, runtime, context: dict) -> str:
         default=str,
     )
     if key == self._last_context_key and self._last_prompt:
-        cli.put_agent_other_info("  \033[90m[cache init]系统提示词未变化\033[0m")
+        logger.debug("calling model session=%s agent=%s turn=%d",
+                     "  \033[90m[cache init]系统提示词未变化\033[0m",
+                         runtime.session_id,
+                         runtime.agent_id,
+                         runtime.state.turn_count,)
         return self._last_prompt
 
     # 更新系统提示词
@@ -196,7 +202,13 @@ def get_system_prompt(self, runtime, context: dict) -> str:
     loaded = ["identity", "tools", "workspace"]
     if context.get("memories"):
         loaded.append("memory")
-    cli.put_agent_other_info(f"  \033[32m[assemble] 片段：{', '.join(loaded)}\033[0m")
+    logger.debug("calling model session=%s agent=%s turn=%d",
+                 "system prompt assembled: sections=%s",
+                 runtime.session_id,
+                 runtime.agent_id,
+                 runtime.state.turn_count,
+                 loaded,
+    )
     
     return self._last_prompt
 

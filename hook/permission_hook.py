@@ -115,15 +115,4 @@ def permission_hook(ctx, block):
                 action=HookAction.ASK,
                 message=f"潜在破坏性指令：{reason}({block.input})",
             )
-            """
-            # 用户批准
-            cli.inform_system_info(f"\n\033[33m⚠ {reason}\033[0m")
-            cli.inform_system_info(f"    Tool: {block.name}({block.input})")
-            choice = cli.get_user_input("\n    是否继续？(y/N): ").strip().lower()
-            if choice not in ("y", "yes"):
-                return HookResult(
-                    action=HookAction.BLOCK,
-                    message="权限已被用户拒绝",
-                )
-            """
     return HookResult()

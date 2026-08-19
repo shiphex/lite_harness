@@ -25,6 +25,7 @@ class EventType(StrEnum):
         - `tool.started`：工具开始
         - `tool.completed`：工具完成
         - `tool.blocked`：工具阻塞
+        - `todo.updated`：待办事项更新
         - `compact.started`：压缩开始
         - `compact.completed`：压缩完成
         - `approval.requested`：审批请求
@@ -49,6 +50,9 @@ class EventType(StrEnum):
     TOOL_STARTED = "tool.started"
     TOOL_COMPLETED = "tool.completed"
     TOOL_BLOCKED = "tool.blocked"
+
+    # todo
+    TODO_UPDATED = "todo.updated"
 
     # compact
     COMPACT_STARTED = "compact.started"
