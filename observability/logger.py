@@ -19,8 +19,14 @@ def configure_logging(
     logger = logging.getLogger(LOGGER_NAME)
 
     # 防止重复初始化
-    if logger.handlers:
-        return
+    logger.setLevel(level)
+
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        logger.addHandler(handler)
+
+    for handler in logger.handlers:
+        handler.setLevel(level)
 
     logger.setLevel(level)
 
