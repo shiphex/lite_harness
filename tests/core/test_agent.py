@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from core import agent
 from core.runtime import state
 from event import EventType, make_event
@@ -33,7 +35,11 @@ def _config(tmp_path):
 def test_create_master_runtime_builds_policy_and_state(monkeypatch, tmp_path):
     monkeypatch.setattr(agent.config, "Config", _config(tmp_path))
     monkeypatch.setattr(agent.tools, "TOOLS_LIST", [{"name": "demo_tool"}])
-    monkeypatch.setattr(agent.tools, "TOOLS_HANDLERS", {"demo_tool": lambda: "ok"})
+    monkeypatch.setattr(
+        agent.tools,
+        "TOOLS_HANDLERS",
+        {"demo_tool": lambda context: "ok"},
+    )
 
     runtime = agent.create_master_runtime([], {})
 
@@ -123,3 +129,21 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
     assert next(
         item for item in events if item.type == EventType.ASSISTANT_MESSAGE
     ).data == {"text": "done"}
+
+
+@pytest.mark.parametrize("exit_input", ["q", "exit", "   "])
+def test_master_agent_accepts_exit_inputs(monkeypatch, exit_input):
+    events = []
+    runtime = SimpleNamespace(
+        session_id="session",
+        agent_id="agent",
+        state=SimpleNamespace(turn_count=0),
+        events=SimpleNamespace(emit=events.append),
+        interaction=SimpleNamespace(get_user_input=lambda message=">> ": exit_input),
+    )
+    monkeypatch.setattr(agent, "create_master_runtime", lambda history, context: runtime)
+    monkeypatch.setattr(agent.builtin, "update_context", lambda *args, **kwargs: {})
+
+    agent.master_agent()
+
+    assert [item.type for item in events] == [EventType.SYSTEM_MESSAGE]

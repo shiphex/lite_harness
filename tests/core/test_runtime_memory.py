@@ -16,7 +16,7 @@ def _policy():
         max_turns=1,
         model={"api": "fake", "model_name": "model"},
         tools_list=[{"name": "demo_tool"}],
-        tool_handler={"demo_tool": lambda: "ok"},
+        tool_handler={"demo_tool": lambda context: "ok"},
     )
 
 
@@ -102,11 +102,11 @@ def test_prompt_builder_uses_runtime_memory_index_and_updates_context(tmp_path, 
     )
     captured = {}
 
-    def capture_prompt(current_runtime, context):
+    def capture_prompt(builder, current_runtime, context):
         captured["context"] = context
         return "system"
 
-    monkeypatch.setattr("builtin.load_prompt.get_system_prompt", capture_prompt)
+    monkeypatch.setattr(PromptBuilder, "get_system_prompt", capture_prompt)
 
     prompt = runtime.prompt.build(runtime)
 

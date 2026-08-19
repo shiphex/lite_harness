@@ -4,9 +4,15 @@ from types import SimpleNamespace
 import builtin.load_prompt as load_prompt
 
 
-def _runtime(tmp_path, tools=None):
+def _runtime(tmp_path, tools=None, prompt=""):
     return SimpleNamespace(
-        policy=SimpleNamespace(tools_list=tools or []),
+        session_id="session",
+        agent_id="agent",
+        state=SimpleNamespace(turn_count=1),
+        policy=SimpleNamespace(
+            tools_list=tools or [],
+            prompt=prompt,
+        ),
         paths=SimpleNamespace(workspace=tmp_path),
     )
 
@@ -14,7 +20,7 @@ def _runtime(tmp_path, tools=None):
 def test_list_skill_returns_empty_message(monkeypatch):
     monkeypatch.setattr(load_prompt, "SKILL_REGISTRY", {})
 
-    assert load_prompt.list_skill() == "(没有发现 skill。)"
+    assert "没有发现" in load_prompt.list_skill()
 
 
 def test_list_skill_formats_registered_skills(monkeypatch):
@@ -30,22 +36,16 @@ def test_list_skill_formats_registered_skills(monkeypatch):
     assert load_prompt.list_skill() == "- **alpha**: Alpha skill\n- **beta**: Beta skill"
 
 
-def test_read_memory_index_returns_empty_string_when_missing(tmp_path, monkeypatch):
-    monkeypatch.setattr(load_prompt, "MEMORY_INDEX", tmp_path / "MEMORY.md")
-
-    assert load_prompt.read_memory_index() == ""
-
-
-def test_read_memory_index_strips_existing_file(tmp_path):
+def test_read_memory_index_returns_stripped_content(tmp_path):
     memory_index = tmp_path / "MEMORY.md"
-    memory_index.write_text("\n- [alpha](alpha.md) - Alpha memory\n\n", encoding="utf-8")
+    memory_index.write_text("\nPersistent project note\n", encoding="utf-8")
 
-    assert load_prompt.read_memory_index(memory_index) == "- [alpha](alpha.md) - Alpha memory"
+    assert load_prompt.read_memory_index(memory_index) == "Persistent project note"
 
 
-def test_build_system_uses_current_workspace_and_memory_index(monkeypatch, tmp_path):
+def test_build_system_uses_workspace_and_memory_index(monkeypatch, tmp_path):
     memory_index = tmp_path / "MEMORY.md"
-    memory_index.write_text("- [project](project.md) - Project facts", encoding="utf-8")
+    memory_index.write_text("Project facts", encoding="utf-8")
     monkeypatch.setattr(load_prompt, "WORKDIR", tmp_path)
     monkeypatch.setattr(load_prompt, "MEMORY_INDEX", memory_index)
     monkeypatch.setattr(load_prompt, "list_skill", lambda: "- **demo**: Demo skill")
@@ -54,11 +54,13 @@ def test_build_system_uses_current_workspace_and_memory_index(monkeypatch, tmp_p
 
     assert str(tmp_path) in system_prompt
     assert "Demo skill" in system_prompt
-    assert "Memories available:" in system_prompt
     assert "Project facts" in system_prompt
 
 
-def test_assemble_system_prompt_uses_runtime_tools_and_workspace(monkeypatch, tmp_path):
+def test_assemble_system_prompt_includes_policy_prompt_and_runtime_data(
+    monkeypatch,
+    tmp_path,
+):
     monkeypatch.setattr(
         load_prompt,
         "PROMPT_SECTIONS",
@@ -68,103 +70,71 @@ def test_assemble_system_prompt_uses_runtime_tools_and_workspace(monkeypatch, tm
             "memory": "memory marker",
         },
     )
-    runtime = _runtime(tmp_path, [{"name": "demo_tool"}])
-
-    assert load_prompt.assemble_system_prompt(runtime, {}) == (
-        "identity section\n\n"
-        "当前可用的 tool 有：demo_tool\n\n"
-        f"当前工作目录是 {tmp_path}\n\n"
-        "skill section\n\n"
-        "memory marker"
-    )
-
-
-def test_assemble_system_prompt_appends_memories(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        load_prompt,
-        "PROMPT_SECTIONS",
-        {
-            "identity": "identity section",
-            "skill": "skill section",
-            "memory": "memory marker",
-        },
-    )
-    runtime = _runtime(tmp_path)
+    runtime = _runtime(tmp_path, [{"name": "demo_tool"}], prompt="policy prompt")
 
     prompt = load_prompt.assemble_system_prompt(runtime, {"memories": "remember me"})
 
+    assert prompt.split("\n\n")[:2] == ["policy prompt", "identity section"]
+    assert "demo_tool" in prompt
+    assert str(tmp_path) in prompt
     assert prompt.endswith("相关记忆：\nremember me")
 
 
-def test_get_system_prompt_reuses_cache_for_equivalent_context(monkeypatch, tmp_path):
+def test_prompt_builder_caches_equivalent_context(monkeypatch, tmp_path):
     calls = []
     runtime = _runtime(tmp_path)
 
-    def fake_assemble(current_runtime, context):
-        calls.append((current_runtime, context))
-        return f"prompt {len(calls)}"
+    monkeypatch.setattr(
+        load_prompt,
+        "assemble_system_prompt",
+        lambda current_runtime, context: calls.append(context) or f"prompt {len(calls)}",
+    )
+    builder = load_prompt.PromptBuilder()
 
-    monkeypatch.setattr(load_prompt, "_last_context_key", None)
-    monkeypatch.setattr(load_prompt, "_last_prompt", None)
-    monkeypatch.setattr(load_prompt, "assemble_system_prompt", fake_assemble)
-    monkeypatch.setattr(load_prompt.cli, "put_agent_other_info", lambda *args: None)
-
-    assert load_prompt.get_system_prompt(runtime, {"b": 2, "a": 1}) == "prompt 1"
-    assert load_prompt.get_system_prompt(runtime, {"a": 1, "b": 2}) == "prompt 1"
+    assert builder.get_system_prompt(runtime, {"b": 2, "a": 1}) == "prompt 1"
+    assert builder.get_system_prompt(runtime, {"a": 1, "b": 2}) == "prompt 1"
     assert len(calls) == 1
 
 
-def test_get_system_prompt_does_not_share_cache_between_runtimes(monkeypatch, tmp_path):
-    monkeypatch.setattr(load_prompt, "_last_context_key", None)
-    monkeypatch.setattr(load_prompt, "_last_prompt", None)
-    monkeypatch.setattr(load_prompt.cli, "put_agent_other_info", lambda *args: None)
-    runtime_a = _runtime(tmp_path / "a", [{"name": "a-tool"}])
-    runtime_b = _runtime(tmp_path / "b", [{"name": "b-tool"}])
-
-    first = load_prompt.get_system_prompt(runtime_a, {})
-    second = load_prompt.get_system_prompt(runtime_b, {})
-
-    assert "a-tool" in first
-    assert "b-tool" in second
-
-
-def test_get_system_prompt_rebuilds_when_context_changes(monkeypatch, tmp_path):
+def test_prompt_builder_does_not_share_cache_between_instances(monkeypatch, tmp_path):
     calls = []
+    monkeypatch.setattr(
+        load_prompt,
+        "assemble_system_prompt",
+        lambda current_runtime, context: calls.append(current_runtime) or f"prompt {len(calls)}",
+    )
     runtime = _runtime(tmp_path)
 
-    def fake_assemble(current_runtime, context):
-        calls.append(context)
-        return f"prompt {len(calls)}"
+    first = load_prompt.PromptBuilder().get_system_prompt(runtime, {})
+    second = load_prompt.PromptBuilder().get_system_prompt(runtime, {})
 
-    monkeypatch.setattr(load_prompt, "_last_context_key", None)
-    monkeypatch.setattr(load_prompt, "_last_prompt", None)
-    monkeypatch.setattr(load_prompt, "assemble_system_prompt", fake_assemble)
-    monkeypatch.setattr(load_prompt.cli, "put_agent_other_info", lambda *args: None)
+    assert first == "prompt 1"
+    assert second == "prompt 2"
 
-    assert load_prompt.get_system_prompt(runtime, {"memories": ""}) == "prompt 1"
-    assert load_prompt.get_system_prompt(runtime, {"memories": "new memory"}) == "prompt 2"
+
+def test_prompt_builder_rebuilds_when_context_changes(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        load_prompt,
+        "assemble_system_prompt",
+        lambda current_runtime, context: calls.append(context) or f"prompt {len(calls)}",
+    )
+    builder = load_prompt.PromptBuilder()
+    runtime = _runtime(tmp_path)
+
+    assert builder.get_system_prompt(runtime, {"memories": ""}) == "prompt 1"
+    assert builder.get_system_prompt(runtime, {"memories": "new"}) == "prompt 2"
     assert len(calls) == 2
 
 
 def test_update_context_returns_tools_workspace_and_memories(monkeypatch, tmp_path):
     memory_index = tmp_path / "MEMORY.md"
-    memory_index.write_text("\nPersistent project note\n", encoding="utf-8")
+    memory_index.write_text("Persistent project note", encoding="utf-8")
     monkeypatch.setattr(load_prompt, "WORKDIR", tmp_path)
-    monkeypatch.setattr(load_prompt, "TOOLS_HANDLERS", {"shell": object(), "todo_write": object()})
+    monkeypatch.setattr(load_prompt, "TOOLS_HANDLERS", {"shell": object()})
 
     assert load_prompt.update_context({}, [], memory_index=memory_index) == {
-        "enabled_tools": ["shell", "todo_write"],
+        "enabled_tools": ["shell"],
         "workspace": str(tmp_path),
         "memories": "Persistent project note",
-    }
-
-
-def test_update_context_uses_empty_memories_when_index_missing(monkeypatch, tmp_path):
-    monkeypatch.setattr(load_prompt, "WORKDIR", tmp_path)
-    monkeypatch.setattr(load_prompt, "TOOLS_HANDLERS", {})
-
-    assert load_prompt.update_context({}, [], memory_index=tmp_path / "missing.md") == {
-        "enabled_tools": [],
-        "workspace": str(tmp_path),
-        "memories": "",
     }

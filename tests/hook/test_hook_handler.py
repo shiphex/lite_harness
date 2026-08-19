@@ -68,6 +68,11 @@ def test_create_default_hooks_registers_runtime_callbacks():
     assert manager._hooks[HookEvent.PRE_TOOL_USE] == [permission_hook]
     assert len(manager._hooks[HookEvent.POST_TOOL_USE]) == 1
     assert len(manager._hooks[HookEvent.STOP]) == 1
+    assert all(
+        callback.__name__ != "log_hook"
+        for callbacks in manager._hooks.values()
+        for callback in callbacks
+    )
 
 
 def test_legacy_trigger_hooks_accepts_runtime_context():

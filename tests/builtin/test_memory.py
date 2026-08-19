@@ -189,6 +189,8 @@ def test_extract_memories_uses_runtime_model_and_returns_success(tmp_path, monke
 
 def test_extract_memories_reports_model_failure_without_files(tmp_path, monkeypatch, capsys):
     manager = _manager(tmp_path)
+    logger_calls = []
+    monkeypatch.setattr(memory.logger, "debug", lambda *args: logger_calls.append(args))
     monkeypatch.setattr(
         memory,
         "create_adapter",
@@ -200,7 +202,8 @@ def test_extract_memories_reports_model_failure_without_files(tmp_path, monkeypa
         [{"role": "user", "content": "Remember tabs."}],
     ) is False
     assert list(manager.root.glob("*.md")) == []
-    assert "model unavailable" in capsys.readouterr().out
+    assert "model unavailable" in repr(logger_calls)
+    assert capsys.readouterr().out == ""
 
 
 def test_consolidate_replaces_files_after_success(tmp_path, monkeypatch):
@@ -231,6 +234,8 @@ def test_consolidate_replaces_files_after_success(tmp_path, monkeypatch):
 
 def test_consolidate_failure_preserves_existing_files(tmp_path, monkeypatch, capsys):
     manager = _manager(tmp_path)
+    logger_calls = []
+    monkeypatch.setattr(memory.logger, "debug", lambda *args: logger_calls.append(args))
     _write_items(manager, memory.CONSOLIDATE_THRESHOLD)
     before = {
         path.name: path.read_text(encoding="utf-8")
@@ -248,4 +253,5 @@ def test_consolidate_failure_preserves_existing_files(tmp_path, monkeypatch, cap
         for path in manager.root.glob("*.md")
     }
     assert after == before
-    assert "summary unavailable" in capsys.readouterr().out
+    assert "summary unavailable" in repr(logger_calls)
+    assert capsys.readouterr().out == ""

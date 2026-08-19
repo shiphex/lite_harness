@@ -84,7 +84,9 @@ def make_runtime(
     interaction=None,
 ):
     tools_list = tools_list if tools_list is not None else []
-    tool_handler = tool_handler or {"demo_tool": lambda value=None: f"demo:{value}"}
+    tool_handler = tool_handler or {
+        "demo_tool": lambda context, value=None: f"demo:{value}"
+    }
     policy = RunPolicy(
         max_turns=max_turns,
         model={"api": "fake", "model_name": "primary"},
@@ -282,8 +284,13 @@ def test_query_loop_round_trips_tool_result_and_response_blocks(monkeypatch, tmp
 
 def test_execute_tool_honors_hook_block_and_triggers_post_hook(monkeypatch, tmp_path):
     executed = []
+    contexts = []
     runtime = make_runtime(tmp_path, tools_list=[{"name": "demo_tool"}])
-    runtime.tools.execute = lambda name, args: executed.append((name, args)) or "ok"
+    runtime.tools.execute = (
+        lambda context, name, args: contexts.append(context)
+        or executed.append((name, args))
+        or "ok"
+    )
     block = ToolCallPart(id="blocked", name="demo_tool", input={})
     allowed = ToolCallPart(id="allowed", name="demo_tool", input={"value": 2})
 
@@ -306,6 +313,8 @@ def test_execute_tool_honors_hook_block_and_triggers_post_hook(monkeypatch, tmp_
 
     assert status == "complete"
     assert executed == [("demo_tool", {"value": 2})]
+    assert len(contexts) == 1
+    assert contexts[0].runtime is runtime
     assert results == [
         {"type": "tool_result", "tool_use_id": "blocked", "content": "blocked by policy"},
         {"type": "tool_result", "tool_use_id": "allowed", "content": "ok"},
@@ -327,7 +336,7 @@ def test_normal_tool_does_not_emit_compact_events(tmp_path):
     executed = []
     runtime = make_runtime(tmp_path, tools_list=[{"name": "demo_tool"}])
     runtime.tools.execute = (
-        lambda name, args: executed.append((name, args)) or "ok"
+        lambda context, name, args: executed.append((name, args)) or "ok"
     )
 
     results, status = loop.execute_tool(
@@ -359,7 +368,7 @@ def test_execute_tool_denied_approval_does_not_execute_dangerous_command(tmp_pat
         tmp_path,
         tools_list=[{"name": "powershell"}],
         tool_handler={
-            "powershell": lambda command: executed.append(command) or "simulated",
+            "powershell": lambda context, command: executed.append(command) or "simulated",
         },
         hooks=create_default_hooks(),
         interaction=interaction,
@@ -463,7 +472,7 @@ def test_execute_tool_approved_dangerous_command_executes_once(tmp_path):
         tmp_path,
         tools_list=[{"name": "powershell"}],
         tool_handler={
-            "powershell": lambda command: executed.append(command) or "simulated",
+            "powershell": lambda context, command: executed.append(command) or "simulated",
         },
         hooks=create_default_hooks(),
         interaction=interaction,

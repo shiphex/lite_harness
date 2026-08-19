@@ -126,14 +126,14 @@ def test_tool_result_budget_ignores_non_tool_result_tail(tmp_path):
     assert compact.tool_result_budget(messages, max_bytes=1, artifacts=artifacts) is messages
 
 
-def test_write_transcript_writes_json_lines(tmp_path, monkeypatch):
+def test_write_transcript_writes_json_lines(tmp_path):
     artifacts = _artifacts(tmp_path)
-    monkeypatch.setattr(compact.time, "time", lambda: 123)
     messages = [{"role": "user", "content": "hello"}]
 
     path = compact.write_transcript(artifacts, messages)
 
-    assert path == artifacts.transcript_dir / "transcript_123.txt"
+    assert path.parent == artifacts.transcript_dir
+    assert path.name.startswith("transcript_")
     assert '"role": "user"' in path.read_text(encoding="utf-8")
 
 

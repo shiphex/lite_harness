@@ -1,16 +1,21 @@
-from hook.summary_hook import summary_hook
+from hook import summary_hook as module
 
-def test_summary_hook(capsys):
+
+def test_summary_hook_logs_tool_count_without_cli_output(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(module.logger, "debug", lambda *args: calls.append(args))
     messages = [
-        {"role": "user", "content": "你好"},
-        {"role": "assistant", "content": "你好！"},
-        {"role": "tool", "content": [{"type": "tool_result", "name": "powershell", "input": {"command": "ls"}}]},
+        {"role": "assistant", "content": []},
+        {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "1", "content": "ok"},
+                {"type": "tool_result", "tool_use_id": "2", "content": "ok"},
+            ],
+        },
     ]
-    result = summary_hook(None, messages)
-    tool_count = sum(1 for m in messages 
-                     for b in (m.get("content") if isinstance(m.get("content"), list) else [])
-                     if isinstance(b, dict) and b.get("type") == "tool_result")
-    # 获取终端捕获到的标准输出和标准错误
-    captured = capsys.readouterr()
-    assert result is None
-    assert captured.out == f"\033[90m● [HOOK] Stop: session used {tool_count} tool calls.\033[0m\n"
+
+    assert module.summary_hook(None, messages) is None
+    assert len(calls) == 1
+    assert "2" in calls[0][0]
+    assert capsys.readouterr().out == ""
