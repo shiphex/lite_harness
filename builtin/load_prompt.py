@@ -220,13 +220,11 @@ def update_context(
     """构建提示词组装器需要的运行时上下文。
 
     Args:
-        context (dict): 现有会话上下文。该参数用于保持调用接口兼容，
-            函数不会修改它。
-        messages (list): 会话消息列表。该参数用于保持调用接口兼容，
-            函数不会修改它。
+        context (dict): 现有会话上下文。函数不会修改原字典。
+        memory_index (Path | None): 可选的记忆索引路径。
 
     Returns:
-        dict: 包含已启用工具名、工作目录路径，以及可选记忆索引内容的上下文。
+        dict: 保留已有上下文并更新记忆索引内容。
     """
     memories = read_memory_index(memory_index)
     return {
