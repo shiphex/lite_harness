@@ -20,10 +20,16 @@ from .runtime import RunPolicy, state, RuntimeFactory
 from builtin.memory import MemoryPolicy, MemoryMode
 from cli.event_sink import CliEventSink
 from cli.cli_interaction import CliInteraction
+from event.sink import EventSink
+from event.interaction import Interaction
 
 
 
-def create_master_runtime(history: List, context: Dict):
+def create_master_runtime(history: List, 
+                          context: Dict,
+                          events: EventSink,
+                          interaction: Interaction,
+                        ):
     """ 创建主 Agent 的运行时环境。
 
     Args:
@@ -73,8 +79,8 @@ def create_master_runtime(history: List, context: Dict):
         memory_policy = memoryPolicy,
         workspace = config.Config().get_path_config("project_path"),
         session_id = None,
-        events = CliEventSink(),
-        interaction = CliInteraction(),
+        events = events,
+        interaction = interaction,
     )
     
     return runtime
@@ -101,7 +107,10 @@ def master_agent():
     # 初始化上下文
     context = builtin.update_context({}, [])
 
-    runtime = create_master_runtime(history, context)
+    runtime = create_master_runtime(history, 
+                                    context,
+                                    events=CliEventSink(),
+                                    interaction=CliInteraction())
 
     # 告知用户系统信息
     runtime.events.emit(

@@ -12,6 +12,7 @@ import event
 import tools
 import hook
 import builtin
+import config
 
 from api.adapter_factory import create_adapter
 from api.contract import ModelRequest, ModelResponse
@@ -20,6 +21,8 @@ from event.interaction import ApprovalRequest
 from tools.tool_class import ToolContext
 
 from typing import Any
+
+content_config = config.Config().get_content_length()
 
 
 def compact_pipeline(runtime: AgentRuntime):
@@ -403,7 +406,7 @@ def query_loop(runtime: AgentRuntime):
 
     while True:
         if max_turns > 0:
-            if state.turn_count >= max_turns:
+            if max_turns > 0 and state.turn_count >= max_turns:
                 state.messages = messages
                 runtime.events.emit(
                     event.make_event(
@@ -509,7 +512,7 @@ def query_loop(runtime: AgentRuntime):
                 )
                 return state, {"reason": "prompt_too_long"}
             if state.max_output_tokens_override and state.recovery_count < builtin.MAX_RECOVERY_RETRIES:
-                state.max_output_tokens = int(state.max_output_tokens * 2)
+                state.max_output_tokens = content_config["ESCALATED_MAX_OUTPUT_TOKENS"]
                 continue            # Continue Site 3: Max Output Tokens
             continue
 
