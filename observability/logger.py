@@ -21,18 +21,6 @@ def configure_logging(
     # 防止重复初始化
     logger.setLevel(level)
 
-    if not logger.handlers:
-        handler = logging.StreamHandler(sys.stderr)
-        logger.addHandler(handler)
-
-    for handler in logger.handlers:
-        handler.setLevel(level)
-
-    logger.setLevel(level)
-
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setLevel(level)
-
     formatter = logging.Formatter(
         fmt=(
             "%(asctime)s "
@@ -43,8 +31,12 @@ def configure_logging(
         datefmt="%H:%M:%S",
     )
 
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    if not logger.handlers:
+        logger.addHandler(logging.StreamHandler(sys.stderr))
+
+    for handler in logger.handlers:
+        handler.setLevel(level)
+        handler.setFormatter(formatter)
 
     # 不再交给 root logger 重复处理
     logger.propagate = False

@@ -23,6 +23,15 @@ from observability.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _runtime_log_context(runtime):
+    state = getattr(runtime, "state", None)
+    return (
+        getattr(runtime, "session_id", "unknown"),
+        getattr(runtime, "agent_id", "unknown"),
+        getattr(state, "turn_count", 0),
+    )
+
+
 class MemoryMode(str, Enum):
     """ 记忆模式枚举类 """
     OFF = "off"
@@ -437,9 +446,7 @@ def extract_memories(self, runtime, messages: list):
         # 解析 JSON，排除空文本段
         if not match:
             logger.debug("calling model session=%s agent=%s turn=%d [Memory: 提取失败] 模型未返回 JSON 数组",
-                         runtime.session_id,
-                         runtime.agent_id,
-                         runtime.state.turn_count,
+                         *_runtime_log_context(runtime),
             )
             return False
         items = json.loads(match.group())
@@ -457,18 +464,14 @@ def extract_memories(self, runtime, messages: list):
                 count += 1
         if count:
             logger.debug("calling model session=%s agent=%s turn=%d [Memory: 提取成功] 成功提取 %d 条新记忆",
-             runtime.session_id,
-             runtime.agent_id,
-             runtime.state.turn_count,
+             *_runtime_log_context(runtime),
              count,
             )
             return True
         return False
     except Exception as e:
         logger.debug("calling model session=%s agent=%s turn=%d [Memory: 提取失败] %s",
-             runtime.session_id,
-             runtime.agent_id,
-             runtime.state.turn_count,
+             *_runtime_log_context(runtime),
              str(e),
         )
         return False
@@ -544,18 +547,18 @@ def consolidate_memories(self, runtime):
             if desc and body:
                 write_memory_file(self, name, mem_type, desc, body)
 
-        logger.debug("calling model session=%s agent=%s turn=%d \n[Memory: 成功整理 {len(files)} → {len(items)} 条记忆]",
-                     runtime.session_id,
-                     runtime.agent_id,
-                     runtime.state.turn_count,
+        logger.debug(
+                     "calling model session=%s agent=%s turn=%d "
+                     "[Memory: 成功整理 %d -> %d 条记忆]",
+                     *_runtime_log_context(runtime),
+                     len(files),
+                     len(items),
                 )
         return True
 
     except Exception as e:
         logger.debug("calling model session=%s agent=%s turn=%d \n[Memory: 整理失败] %s",
-                     runtime.session_id,
-                     runtime.agent_id,
-                     runtime.state.turn_count,
+                         *_runtime_log_context(runtime),
                      str(e),
                 )
         return False

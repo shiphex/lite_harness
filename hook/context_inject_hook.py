@@ -23,6 +23,8 @@ def context_inject_hook(ctx, query: str):
     """
     WORKDIR = config.Config().get_path_config("project_path")
     logger.debug(
-        f"[HOOK] UserPromptSubmit: {query}, working in {WORKDIR}"
+        "[HOOK] UserPromptSubmit: working in %s (query_length=%d)",
+        WORKDIR,
+        len(query),
     )
     return None
