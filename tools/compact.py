@@ -16,6 +16,7 @@ import config
 import api
 
 from builtin.artifacts import ArtifactStore, persist_large_output, write_transcript
+from .tool_class import ToolContext
 
 # 内容长度参数
 content_length = config.Config().get_content_length()
@@ -104,7 +105,7 @@ def _is_tool_message(msg):
 
 
 
-def snip_compact(messages, max_massages = 50):
+def snip_compact(context: ToolContext, messages, max_massages = 50):
     """ 裁剪式压缩函数
 
     该函数用于裁剪聊天记录, 保留最开始的 messages 和最近的 messages, 删除中间的 messages。
@@ -176,7 +177,7 @@ def _collect_tool_results(messages):
     return blocks
 
 
-def micro_compact(messages):
+def micro_compact(context: ToolContext, messages):
     """ 旧工具结果占位符替换函数
     
     该函数用于将聊天记录中早期的工具调用结果压缩为占位符，
@@ -229,7 +230,8 @@ def persist_large_output(tool_use_id, output):
     return f"<persisted-output>\n完整输出所在路径: {path}\n预览:\n{output[:200]}\n</persisted-output>"
 '''
 
-def tool_result_budget(messages, 
+def tool_result_budget(context: ToolContext, 
+                       messages, 
                        max_bytes: int = TOOL_RESULT_MAX_CHARS, 
                        artifacts = None):
     """ 工具调用结果大小评估与储存函数
@@ -315,7 +317,7 @@ def summarize_history(messages):
                      if getattr(block, "type", None) == "text").strip() or "(空摘要)"
 
 
-def compact_history(messages, artifacts: ArtifactStore):
+def compact_history(context: ToolContext, messages, artifacts: ArtifactStore):
     """ LLM 全量摘要函数
     
     该函数用于调用大模型进行总结历史聊天，
@@ -336,7 +338,7 @@ def compact_history(messages, artifacts: ArtifactStore):
 
 # ------------------ 应急 reactive_compact -------------------
 
-def reactive_compact(messages, artifacts: ArtifactStore):
+def reactive_compact(context: ToolContext, messages, artifacts: ArtifactStore):
     """ 反应性压缩函数
     
     该函数用于在 API Error 时调用，

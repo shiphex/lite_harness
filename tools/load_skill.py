@@ -11,6 +11,7 @@ Typical usage example:
 from pathlib import Path
 import yaml
 import config
+from .tool_class import ToolContext
 
 
 # skill 注册表
@@ -110,7 +111,7 @@ def build_skill_prompt() -> str:
     return (f"当前可用的 skill 有：{catalog}")
 
 
-def load_skill(name: str) -> str:
+def load_skill(context: ToolContext, name: str) -> str:
     """ 加载 skill 工具执行
 
     该函数用于加载指定 skill 的全部内容。

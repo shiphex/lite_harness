@@ -37,6 +37,10 @@ MEMORY_INDEX = config.Config().get_path_config("memory_index")
 
 class PromptBuilder:
 
+    def __init__(self):
+        self._last_context_key = None
+        self._last_prompt = None
+
     def build(self, 
               runtime, 
         ) -> str:
@@ -47,7 +51,7 @@ class PromptBuilder:
             memory_index=runtime.memory.index_path,
         )
         runtime.state.context = context
-        system_prompt = get_system_prompt(runtime, context)
+        system_prompt = get_system_prompt(self, runtime, context)
 
         return system_prompt
  
@@ -115,7 +119,7 @@ def build_system() -> str:
 # ═══════════════════════════════════════════════════════════
 
 PROMPT_SECTIONS = {
-    "identity": "你是是一个编码助手，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。",
+    "identity": "当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。",
     "tools": f"当前可用的 tool 有：{', '.join([tool['name'] for tool in TOOLS_LIST])}",
     "workspace": f"当前工作目录是 {WORKDIR}",
     "skill": f"当前可用的 skill 有：{list_skill()}",
@@ -136,6 +140,9 @@ def assemble_system_prompt(runtime, context: dict) -> str:
     """
     sections = []
 
+    if runtime.policy.prompt:
+        sections.append(runtime.policy.prompt)
+
     sections.append(PROMPT_SECTIONS["identity"])
     sections.append(f"当前可用的 tool 有：{', '.join([tool['name'] for tool in runtime.policy.tools_list])}")
     sections.append(f"当前工作目录是 {runtime.paths.workspace}")
@@ -149,11 +156,8 @@ def assemble_system_prompt(runtime, context: dict) -> str:
     return "\n\n".join(sections)
 
 
-_last_context_key = None
-_last_prompt = None
-
 # 获得系统提示词
-def get_system_prompt(runtime, context: dict) -> str:
+def get_system_prompt(self, runtime, context: dict) -> str:
     """获取当前上下文对应的系统提示词。
 
     缓存键由 ``context`` 的稳定 JSON 表示生成。因此，键顺序不同但内容
@@ -165,7 +169,6 @@ def get_system_prompt(runtime, context: dict) -> str:
     Returns:
         str: 上下文未变化时返回缓存提示词，否则返回重新组装的提示词。
     """
-    global _last_context_key, _last_prompt
 
     # 将 Python 对象序列化为 JSON 字符串。
     # sort_keys=True: 字典的键强制按字母升序排序后输出 JSON。
@@ -181,13 +184,13 @@ def get_system_prompt(runtime, context: dict) -> str:
         ensure_ascii=False,
         default=str,
     )
-    if key == _last_context_key and _last_prompt:
+    if key == self._last_context_key and self._last_prompt:
         cli.put_agent_other_info("  \033[90m[cache init]系统提示词未变化\033[0m")
-        return _last_prompt
+        return self._last_prompt
 
     # 更新系统提示词
-    _last_context_key = key
-    _last_prompt = assemble_system_prompt(runtime, context)
+    self._last_context_key = key
+    self._last_prompt = assemble_system_prompt(runtime, context)
 
     # 打印加载的段落
     loaded = ["identity", "tools", "workspace"]
@@ -195,7 +198,7 @@ def get_system_prompt(runtime, context: dict) -> str:
         loaded.append("memory")
     cli.put_agent_other_info(f"  \033[32m[assemble] 片段：{', '.join(loaded)}\033[0m")
     
-    return _last_prompt
+    return self._last_prompt
 
 
 # 更新上下文

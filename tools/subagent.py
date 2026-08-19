@@ -12,6 +12,7 @@ import cli
 import config
 import hook
 from . import tool_handler
+from .tool_class import ToolContext
 
 
 WORKDIR = config.Config().get_path_config("project_path")
@@ -43,7 +44,7 @@ def extract_text(content) -> str:
     return "\n".join(getattr(b, "text", "") for b in content if getattr(b, "type", "") == "text")
 
 
-def spawn_subagent(description: str) -> str:
+def spawn_subagent(context: ToolContext, description: str) -> str:
     """ subagent 循环函数。
 
     subagent 的 loop 循环

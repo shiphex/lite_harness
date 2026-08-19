@@ -17,6 +17,7 @@ from api.adapter_factory import create_adapter
 from api.contract import ModelRequest, ModelResponse
 from .runtime import AgentRuntime
 from event.interaction import ApprovalRequest
+from tools.tool_handler import ToolContext
 
 from typing import Any
 
@@ -49,15 +50,16 @@ def compact_pipeline(runtime: AgentRuntime):
 
     # 执行压缩管线
     messages[:] = tools.tool_result_budget(             # L3 储存大的工具调用输出结果
-        messages,
+        context = ToolContext(runtime),
+        messages = messages,
         artifacts = runtime.artifacts,
     )      
-    messages[:] = tools.snip_compact(messages)          # L1 裁剪式压缩
-    messages[:] = tools.micro_compact(messages)         # L2旧工具输出结果占位符替换
+    messages[:] = tools.snip_compact(ToolContext(runtime), messages)          # L1 裁剪式压缩
+    messages[:] = tools.micro_compact(ToolContext(runtime), messages)         # L2旧工具输出结果占位符替换
     # 若压缩后历史记录超过上下文大小，执行紧凑式压缩
     CONTEXT_LIMIT = 50000
     if tools.estimate_size(messages) > CONTEXT_LIMIT:
-        messages[:] = tools.compact_history(messages, runtime.artifacts)
+        messages[:] = tools.compact_history(ToolContext(runtime), messages, runtime.artifacts)
 
     runtime.events.emit(
                         event.make_event(
@@ -283,7 +285,7 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
                 )
             )
 
-            messages[:] = tools.compact_history(messages, runtime.artifacts,)
+            messages[:] = tools.compact_history(ToolContext(runtime), messages, runtime.artifacts,)
             results.append({
                 "type": "tool_result",
                 "tool_use_id": block.id,
@@ -331,7 +333,9 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
         )
 
         # 执行工具调用
-        output = runtime.tools.execute(block.name, block.input)
+        output = runtime.tools.execute(context = ToolContext(runtime), 
+                                       name = block.name, 
+                                       args = block.input)
 
         # 触发 PostToolUse hook
         runtime.hooks.run(hook.HookEvent.POST_TOOL_USE,
@@ -457,7 +461,7 @@ def query_loop(runtime: AgentRuntime):
                             trigger="prompt_too_long",
                         )
                     )
-                    messages[:] = tools.reactive_compact(messages, runtime.artifacts)
+                    messages[:] = tools.reactive_compact(ToolContext(runtime), messages, runtime.artifacts)
                     state.has_attempted_reactive_compact = True
                     runtime.events.emit(
                         event.make_event(

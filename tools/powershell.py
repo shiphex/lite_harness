@@ -9,9 +9,10 @@ Typical usage example:
 
 import os
 import subprocess
+from .tool_class import ToolContext
 
 
-def run_powershell(command: str) -> str:
+def run_powershell(context: ToolContext, command: str) -> str:
     """ 执行 PowerShell 命令。
 
     该函数用于执行 PowerShell 命令。

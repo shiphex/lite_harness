@@ -44,7 +44,7 @@ def create_master_runtime(history: List, context: Dict):
     )
     content_config = config.Config().get_content_length()
     agent_RunPolicy = RunPolicy(max_turns = 300,
-                                prompt = "",
+                                prompt = "你是一个编码助手",
                                 model = configured_model,
                                 fallback_model = fallback_model,
                                 tools_list = tools.TOOLS_LIST, 

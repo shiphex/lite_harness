@@ -13,6 +13,7 @@ Typical usage example:
 import ast
 import json
 import cli
+from .tool_class import ToolContext
 
 
 # reminder 机制
@@ -63,7 +64,7 @@ def _normalize_todos(todos):
 
 # todo_write 工具执行
     # 任务状态：pending 待办, in_progress 进行中, completed 已完成
-def run_todo_write(todos: list) -> str:
+def run_todo_write(context: ToolContext, todos: list) -> str:
     """ 设计任务规划。
 
     该函数用于设计任务规划。
