@@ -17,7 +17,7 @@ from api.adapter_factory import create_adapter
 from api.contract import ModelRequest, ModelResponse
 from .runtime import AgentRuntime
 from event.interaction import ApprovalRequest
-from tools.tool_handler import ToolContext
+from tools.tool_class import ToolContext
 
 from typing import Any
 
