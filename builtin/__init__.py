@@ -1,4 +1,3 @@
-from .permission import check_permission
 from .memory import (
     MemoryManager,
     MemoryMode,
@@ -15,7 +14,6 @@ from .error_recovery import MAX_RECOVERY_RETRIES
 
 
 __all__ = [
-    "check_permission",
     "MemoryManager", "MemoryMode", "MemoryPolicy",
     "load_memories", "extract_memories", "consolidate_memories", 
     "build_system",
