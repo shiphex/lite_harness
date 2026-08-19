@@ -608,7 +608,7 @@ def test_query_loop_allows_unlimited_turns_when_max_turns_is_zero(
 
     assert status == {"reason": "completed"}
     assert len(requests) == 1
-    assert event_count(runtime.events.events, EventType.TURN_STARTED) == 0
+    assert event_count(runtime.events.events, EventType.TURN_STARTED) == 1
 
 
 def test_query_loop_reacts_to_prompt_too_long_once(monkeypatch, tmp_path):
