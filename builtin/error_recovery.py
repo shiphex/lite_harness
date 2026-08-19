@@ -95,8 +95,10 @@ def with_llm_retry(fn, state, RunPolicy):
             if "ratelimit" in name.lower() or "429" in msg:
                 delay = retry_delay(attempt)
                 logger.info(
-                    f"  \033[33m[429 rate limit] retry {attempt + 1}/{MAX_RETRIES} ",
-                    f"wait {delay:.1f}s\033[0m"
+                    "  \033[33m[429 rate limit] retry %d/%d wait %.1fs\033[0m",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
                 )
                 time.sleep(delay)
                 continue
@@ -121,8 +123,10 @@ def with_llm_retry(fn, state, RunPolicy):
                         )
                 delay = retry_delay(attempt)
                 logger.info(
-                    f"  \033[33m[529 overloaded] retry {attempt + 1}/{MAX_RETRIES} ",
-                    f"wait {delay:.1f}s\033[0m"
+                    "  \033[33m[529 overloaded] retry %d/%d wait %.1fs\033[0m",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
                 )
                 time.sleep(delay)
                 continue
@@ -159,8 +163,10 @@ def with_retry(fn, state: RecoveryState):
             if "ratelimit" in name.lower() or "429" in msg:
                 delay = retry_delay(attempt)
                 logger.info(
-                    f"  \033[33m[429 rate limit] retry {attempt + 1}/{MAX_RETRIES} ",
-                    f"wait {delay:.1f}s\033[0m"
+                    "  \033[33m[429 rate limit] retry %d/%d wait %.1fs\033[0m",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
                 )
                 time.sleep(delay)
                 continue
@@ -185,8 +191,10 @@ def with_retry(fn, state: RecoveryState):
                         )
                 delay = retry_delay(attempt)
                 logger.info(
-                    f"  \033[33m[529 overloaded] retry {attempt + 1}/{MAX_RETRIES} ",
-                    f"wait {delay:.1f}s\033[0m"
+                    "  \033[33m[529 overloaded] retry %d/%d wait %.1fs\033[0m",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
                 )
                 time.sleep(delay)
                 continue

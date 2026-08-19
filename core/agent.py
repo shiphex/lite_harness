@@ -105,7 +105,7 @@ def master_agent():
     # 初始化历史记录
     history = []
     # 初始化上下文
-    context = builtin.update_context({}, [])
+    context = builtin.update_context({})
 
     runtime = create_master_runtime(history, 
                                     context,
@@ -148,7 +148,7 @@ def master_agent():
 
         # 更新上下文
         history = agent_state.messages
-        context = builtin.update_context(context, history, memory_index=runtime.memory.index_path)
+        context = builtin.update_context(context, memory_index=runtime.memory.index_path)
 
         # 执行系统输出
         response = next(
