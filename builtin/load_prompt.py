@@ -52,9 +52,65 @@ class PromptBuilder:
             memory_index=runtime.memory.index_path,
         )
         runtime.state.context = context
-        system_prompt = get_system_prompt(self, runtime, context)
+        system_prompt = self.get_system_prompt(runtime, context)
 
         return system_prompt
+
+    # 获得系统提示词
+    def get_system_prompt(self, runtime, context: dict) -> str:
+        """获取当前上下文对应的系统提示词。
+
+        缓存键由 ``context`` 的稳定 JSON 表示生成。因此，键顺序不同但内容
+        等价的字典会复用同一份提示词；JSON 原生不支持的值会通过 ``str`` 转换。
+
+        Args:
+            context (dict): 用于组装提示词的运行时上下文。
+
+        Returns:
+            str: 上下文未变化时返回缓存提示词，否则返回重新组装的提示词。
+        """
+
+        # 将 Python 对象序列化为 JSON 字符串。
+        # sort_keys=True: 字典的键强制按字母升序排序后输出 JSON。
+        # ensure_ascii=False: 直接输出原始中文 / 特殊字符，不转义成 Unicode 转义字符。
+        # default=str: 处理 JSON 原生不支持序列化的对象，如 None、datetime 等。
+        runtime_key = {
+            "workspace": str(runtime.paths.workspace),
+            "tools": runtime.policy.tools_list,
+        }
+        key = json.dumps(
+            {"runtime": runtime_key, "context": context},
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+        )
+        if key == self._last_context_key and self._last_prompt:
+            logger.debug(
+                "calling model session=%s agent=%s turn=%d "
+                "[cache init]系统提示词未变化",
+                runtime.session_id,
+                runtime.agent_id,
+                runtime.state.turn_count,
+            )
+            return self._last_prompt
+
+        # 更新系统提示词
+        self._last_context_key = key
+        self._last_prompt = assemble_system_prompt(runtime, context)
+
+        # 打印加载的段落
+        loaded = ["identity", "tools", "workspace"]
+        if context.get("memories"):
+            loaded.append("memory")
+        logger.debug(
+            "calling model session=%s agent=%s turn=%d "
+            "system prompt assembled: sections=%s",
+            runtime.session_id,
+            runtime.agent_id,
+            runtime.state.turn_count,
+            loaded,
+        )
+        return self._last_prompt
  
 
 
@@ -155,59 +211,6 @@ def assemble_system_prompt(runtime, context: dict) -> str:
         sections.append(f"相关记忆：\n{memories}")
 
     return "\n\n".join(sections)
-
-
-# 获得系统提示词
-def get_system_prompt(self, runtime, context: dict) -> str:
-    """获取当前上下文对应的系统提示词。
-
-    缓存键由 ``context`` 的稳定 JSON 表示生成。因此，键顺序不同但内容
-    等价的字典会复用同一份提示词；JSON 原生不支持的值会通过 ``str`` 转换。
-
-    Args:
-        context (dict): 用于组装提示词的运行时上下文。
-
-    Returns:
-        str: 上下文未变化时返回缓存提示词，否则返回重新组装的提示词。
-    """
-
-    # 将 Python 对象序列化为 JSON 字符串。
-    # sort_keys=True: 字典的键强制按字母升序排序后输出 JSON。
-    # ensure_ascii=False: 直接输出原始中文 / 特殊字符，不转义成 Unicode 转义字符。
-    # default=str: 处理 JSON 原生不支持序列化的对象，如 None、datetime 等。
-    runtime_key = {
-        "workspace": str(runtime.paths.workspace),
-        "tools": runtime.policy.tools_list,
-    }
-    key = json.dumps(
-        {"runtime": runtime_key, "context": context},
-        sort_keys=True,
-        ensure_ascii=False,
-        default=str,
-    )
-    if key == self._last_context_key and self._last_prompt:
-        logger.debug("calling model session=%s agent=%s turn=%d \033[90m[cache init]系统提示词未变化\033[0m",
-                         runtime.session_id,
-                         runtime.agent_id,
-                         runtime.state.turn_count,)
-        return self._last_prompt
-
-    # 更新系统提示词
-    self._last_context_key = key
-    self._last_prompt = assemble_system_prompt(runtime, context)
-
-    # 打印加载的段落
-    loaded = ["identity", "tools", "workspace"]
-    if context.get("memories"):
-        loaded.append("memory")
-    logger.debug("calling model session=%s agent=%s turn=%d system prompt assembled: sections=%s",
-                 runtime.session_id,
-                 runtime.agent_id,
-                 runtime.state.turn_count,
-                 loaded,
-    )
-    
-    return self._last_prompt
 
 
 # 更新上下文
