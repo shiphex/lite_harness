@@ -96,7 +96,7 @@ def run_todo_write(context: ToolContext, todos: list) -> str:
         event.make_event(
             context.runtime,
             event.EventType.TODO_UPDATED,
-            text = "\n".join(lines),
+            todos=todos,
         )
     )
 
