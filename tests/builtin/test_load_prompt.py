@@ -127,14 +127,46 @@ def test_prompt_builder_rebuilds_when_context_changes(monkeypatch, tmp_path):
     assert len(calls) == 2
 
 
-def test_update_context_returns_tools_workspace_and_memories(monkeypatch, tmp_path):
+def test_prompt_builder_rebuilds_when_runtime_changes(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        load_prompt,
+        "assemble_system_prompt",
+        lambda current_runtime, context: calls.append(
+            (current_runtime.paths.workspace, current_runtime.policy.tools_list)
+        ) or f"prompt {len(calls)}",
+    )
+    builder = load_prompt.PromptBuilder()
+    runtime_a = _runtime(tmp_path / "a", [{"name": "tool-a"}])
+    runtime_b = _runtime(tmp_path / "b", [{"name": "tool-b"}])
+
+    assert builder.get_system_prompt(runtime_a, {}) == "prompt 1"
+    assert builder.get_system_prompt(runtime_b, {}) == "prompt 2"
+    assert calls == [
+        (tmp_path / "a", [{"name": "tool-a"}]),
+        (tmp_path / "b", [{"name": "tool-b"}]),
+    ]
+
+
+def test_update_context_preserves_existing_context_and_updates_memories(tmp_path):
     memory_index = tmp_path / "MEMORY.md"
     memory_index.write_text("Persistent project note", encoding="utf-8")
-    monkeypatch.setattr(load_prompt, "WORKDIR", tmp_path)
-    monkeypatch.setattr(load_prompt, "TOOLS_HANDLERS", {"shell": object()})
+    context = {"custom": "value", "enabled_tools": ["shell"]}
 
-    assert load_prompt.update_context({}, [], memory_index=memory_index) == {
+    assert load_prompt.update_context(context, memory_index=memory_index) == {
+        "custom": "value",
         "enabled_tools": ["shell"],
-        "workspace": str(tmp_path),
         "memories": "Persistent project note",
+    }
+
+
+def test_update_context_uses_empty_memories_when_index_is_missing(tmp_path):
+    context = {"custom": "value"}
+
+    assert load_prompt.update_context(
+        context,
+        memory_index=tmp_path / "missing.md",
+    ) == {
+        "custom": "value",
+        "memories": "",
     }

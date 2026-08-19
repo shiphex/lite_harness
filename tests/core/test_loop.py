@@ -590,6 +590,27 @@ def test_query_loop_stops_at_max_turns_after_tool_round(monkeypatch, tmp_path):
     assert event_count(runtime.events.events, EventType.RUN_COMPLETED) == 1
 
 
+def test_query_loop_allows_unlimited_turns_when_max_turns_is_zero(
+    monkeypatch,
+    tmp_path,
+):
+    requests = []
+
+    class Adapter:
+        def complete(self, request):
+            requests.append(request)
+            return ModelResponse(content=[TextPart("done")], stop_reason="end_turn")
+
+    runtime = make_runtime(tmp_path, max_turns=0)
+    patch_loop_dependencies(monkeypatch, runtime, Adapter())
+
+    _, status = loop.query_loop(runtime)
+
+    assert status == {"reason": "completed"}
+    assert len(requests) == 1
+    assert event_count(runtime.events.events, EventType.TURN_STARTED) == 0
+
+
 def test_query_loop_reacts_to_prompt_too_long_once(monkeypatch, tmp_path):
     class PromptTooLong(Exception):
         pass
@@ -724,6 +745,11 @@ def test_query_loop_uses_current_output_budget_after_max_tokens(monkeypatch, tmp
     runtime = make_runtime(tmp_path)
     runtime.state.max_output_tokens = 10
     runtime.state.recovery_count = 0
+    monkeypatch.setattr(
+        loop,
+        "content_config",
+        {"ESCALATED_MAX_OUTPUT_TOKENS": 20},
+    )
     patch_loop_dependencies(monkeypatch, runtime, Adapter())
 
     loop.query_loop(runtime)

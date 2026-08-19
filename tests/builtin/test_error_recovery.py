@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 
@@ -30,7 +31,7 @@ def test_retry_delay_uses_exponential_backoff_with_jitter(monkeypatch):
     assert error_recovery.retry_delay(2) == 2.5
 
 
-def test_with_retry_retries_rate_limit_errors(monkeypatch):
+def test_with_retry_retries_rate_limit_errors(monkeypatch, caplog, capsys):
     calls = []
     state = error_recovery.RecoveryState()
     monkeypatch.setattr(error_recovery, "retry_delay", lambda attempt: 0)
@@ -42,9 +43,14 @@ def test_with_retry_retries_rate_limit_errors(monkeypatch):
             raise RateLimitError("429 too many requests")
         return "ok"
 
-    assert error_recovery.with_retry(flaky_call, state) == "ok"
+    with caplog.at_level(logging.INFO, logger=error_recovery.logger.name):
+        assert error_recovery.with_retry(flaky_call, state) == "ok"
     assert calls == ["call", "call"]
     assert state.consecutive_529 == 0
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("[429 rate limit]" in message for message in messages)
+    assert any("wait 0.0s" in message for message in messages)
+    assert capsys.readouterr().out == ""
 
 
 def test_with_retry_switches_to_fallback_after_consecutive_overloads(monkeypatch):
@@ -178,6 +184,20 @@ def test_max_tokens_too_long_error_escalates_before_appending_messages():
     assert state.has_escalated is True
     assert state.recovery_count == 0
     assert messages == [{"role": "user", "content": "start"}]
+
+
+def test_max_tokens_recovery_logs_without_stdout(caplog, capsys):
+    current_state = error_recovery.RecoveryState()
+    messages = [{"role": "user", "content": "start"}]
+
+    with caplog.at_level(logging.DEBUG, logger=error_recovery.logger.name):
+        error_recovery.max_tokens_too_long_error(messages, current_state)
+
+    assert any(
+        "[max_tokens] escalating output budget" in record.getMessage()
+        for record in caplog.records
+    )
+    assert capsys.readouterr().out == ""
 
 
 def test_max_tokens_too_long_error_appends_continuation_after_escalation():

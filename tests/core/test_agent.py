@@ -6,8 +6,6 @@ import pytest
 from core import agent
 from core.runtime import state
 from event import EventType, make_event
-from cli.cli_interaction import CliInteraction
-from cli.event_sink import CliEventSink
 from hook.hook_handler import HookEvent
 
 
@@ -41,7 +39,14 @@ def test_create_master_runtime_builds_policy_and_state(monkeypatch, tmp_path):
         {"demo_tool": lambda context: "ok"},
     )
 
-    runtime = agent.create_master_runtime([], {})
+    events = object()
+    interaction = object()
+    runtime = agent.create_master_runtime(
+        [],
+        {},
+        events=events,
+        interaction=interaction,
+    )
 
     assert runtime.policy.model["model_name"] == "configured-model"
     assert runtime.policy.fallback_model["model_name"] == "fallback-model"
@@ -50,8 +55,8 @@ def test_create_master_runtime_builds_policy_and_state(monkeypatch, tmp_path):
     assert runtime.state.max_output_tokens == 1234
     assert runtime.state.recovery_count == 0
     assert runtime.paths.workspace == tmp_path
-    assert isinstance(runtime.events, CliEventSink)
-    assert isinstance(runtime.interaction, CliInteraction)
+    assert runtime.events is events
+    assert runtime.interaction is interaction
 
 
 def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_path):
@@ -73,8 +78,14 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
         ),
     )
     hook_calls = []
+    begin_run_calls = []
+    created_with = {}
     runtime.hooks = SimpleNamespace(
         run=lambda event, context, *args: hook_calls.append((event, context, args))
+    )
+    runtime.begin_run = lambda: (
+        begin_run_calls.append(True),
+        setattr(runtime.state, "turn_count", 0),
     )
     captured = {}
     context_updates = []
@@ -98,7 +109,8 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
         )
         return current_runtime.state, {"reason": "completed"}
 
-    def fake_create_runtime(history, context):
+    def fake_create_runtime(history, context, **kwargs):
+        created_with.update(kwargs)
         runtime.state.messages = history
         runtime.state.context = context
         return runtime
@@ -109,18 +121,21 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
     monkeypatch.setattr(
         agent.builtin,
         "update_context",
-        lambda context, messages, **kwargs: context_updates.append((context, messages, kwargs)) or context,
+        lambda context, **kwargs: context_updates.append((context, kwargs)) or context,
     )
 
     agent.master_agent()
 
     assert captured["runtime"] is runtime
+    assert len(begin_run_calls) == 1
+    assert set(created_with) == {"events", "interaction"}
     assert runtime.state.messages[0] == {"role": "user", "content": "hello"}
     assert hook_calls == [
         (HookEvent.USER_PROMPT_SUBMIT, "hook-context", ("hello",)),
     ]
     assert len(context_updates) == 2
-    assert context_updates[-1][2]["memory_index"] == runtime.memory.index_path
+    assert context_updates[0] == ({}, {})
+    assert context_updates[-1][1]["memory_index"] == runtime.memory.index_path
     event_types = [item.type for item in events]
     assert event_types.count(EventType.SYSTEM_MESSAGE) == 1
     assert event_types.count(EventType.ASSISTANT_MESSAGE) == 1
@@ -141,7 +156,11 @@ def test_master_agent_accepts_exit_inputs(monkeypatch, exit_input):
         events=SimpleNamespace(emit=events.append),
         interaction=SimpleNamespace(get_user_input=lambda message=">> ": exit_input),
     )
-    monkeypatch.setattr(agent, "create_master_runtime", lambda history, context: runtime)
+    monkeypatch.setattr(
+        agent,
+        "create_master_runtime",
+        lambda history, context, **kwargs: runtime,
+    )
     monkeypatch.setattr(agent.builtin, "update_context", lambda *args, **kwargs: {})
 
     agent.master_agent()

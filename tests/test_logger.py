@@ -34,8 +34,11 @@ def test_configure_logging_is_idempotent_and_updates_level(
     assert logger.level == logging.INFO
     assert logger.handlers[0].level == logging.INFO
     assert logger.handlers[0].formatter is not None
+    assert "%(levelname)s" in logger.handlers[0].formatter._fmt
 
     configure_logging(logging.DEBUG)
     assert len(logger.handlers) == 1
     assert logger.level == logging.DEBUG
     assert logger.handlers[0].level == logging.DEBUG
+    assert logger.handlers[0].formatter is not None
+    assert "%(message)s" in logger.handlers[0].formatter._fmt
