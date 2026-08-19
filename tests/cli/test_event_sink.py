@@ -55,6 +55,27 @@ def test_cli_event_sink_truncates_tool_output(monkeypatch):
     assert calls == ["x" * 200]
 
 
+def test_cli_event_sink_formats_todo_updated_event(monkeypatch):
+    calls = []
+    monkeypatch.setattr(event_sink.cli, "put_agent_output", calls.append)
+
+    todos = [
+        {"content": "read", "status": "pending"},
+        {"content": "edit", "status": "in_progress"},
+        {"content": "test", "status": "completed"},
+    ]
+    event_sink.CliEventSink().emit(
+        make_event(RuntimeStub(), EventType.TODO_UPDATED, todos=todos)
+    )
+
+    assert calls == [
+        "\033[33m## Current Tasks\033[0m\n"
+        "    [ ] read\n"
+        "    [\033[36m▸\033[0m] edit\n"
+        "    [\033[32m✓\033[0m] test"
+    ]
+
+
 def test_cli_event_sink_ignores_unhandled_events(monkeypatch):
     calls = []
     for method in (

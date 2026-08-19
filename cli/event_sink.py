@@ -36,6 +36,16 @@ class CliEventSink:
                 cli.put_agent_other_info(
                     f"[BLOCKED]: {reason}"
                 )
+
+            case EventType.TODO_UPDATED:
+                current_todos = event.data["todos"]
+                lines = ["\033[33m## Current Tasks\033[0m"]
+                for t in current_todos:
+                    icon = {"pending": " ", "in_progress": "\033[36m▸\033[0m", "completed": "\033[32m✓\033[0m"}[t["status"]]   # 把整个大字典写在方括号前面，直接根据键取值
+                    lines.append(f"    [{icon}] {t['content']}")
+                cli.put_agent_output(
+                    "\n".join(lines)
+                )
                 
             case EventType.COMPACT_STARTED:
                 cli.put_agent_other_info(

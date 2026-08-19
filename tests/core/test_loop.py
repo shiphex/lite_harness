@@ -84,7 +84,9 @@ def make_runtime(
     interaction=None,
 ):
     tools_list = tools_list if tools_list is not None else []
-    tool_handler = tool_handler or {"demo_tool": lambda value=None: f"demo:{value}"}
+    tool_handler = tool_handler or {
+        "demo_tool": lambda context, value=None: f"demo:{value}"
+    }
     policy = RunPolicy(
         max_turns=max_turns,
         model={"api": "fake", "model_name": "primary"},
@@ -282,8 +284,13 @@ def test_query_loop_round_trips_tool_result_and_response_blocks(monkeypatch, tmp
 
 def test_execute_tool_honors_hook_block_and_triggers_post_hook(monkeypatch, tmp_path):
     executed = []
+    contexts = []
     runtime = make_runtime(tmp_path, tools_list=[{"name": "demo_tool"}])
-    runtime.tools.execute = lambda name, args: executed.append((name, args)) or "ok"
+    runtime.tools.execute = (
+        lambda context, name, args: contexts.append(context)
+        or executed.append((name, args))
+        or "ok"
+    )
     block = ToolCallPart(id="blocked", name="demo_tool", input={})
     allowed = ToolCallPart(id="allowed", name="demo_tool", input={"value": 2})
 
@@ -306,6 +313,8 @@ def test_execute_tool_honors_hook_block_and_triggers_post_hook(monkeypatch, tmp_
 
     assert status == "complete"
     assert executed == [("demo_tool", {"value": 2})]
+    assert len(contexts) == 1
+    assert contexts[0].runtime is runtime
     assert results == [
         {"type": "tool_result", "tool_use_id": "blocked", "content": "blocked by policy"},
         {"type": "tool_result", "tool_use_id": "allowed", "content": "ok"},
@@ -327,7 +336,7 @@ def test_normal_tool_does_not_emit_compact_events(tmp_path):
     executed = []
     runtime = make_runtime(tmp_path, tools_list=[{"name": "demo_tool"}])
     runtime.tools.execute = (
-        lambda name, args: executed.append((name, args)) or "ok"
+        lambda context, name, args: executed.append((name, args)) or "ok"
     )
 
     results, status = loop.execute_tool(
@@ -359,7 +368,7 @@ def test_execute_tool_denied_approval_does_not_execute_dangerous_command(tmp_pat
         tmp_path,
         tools_list=[{"name": "powershell"}],
         tool_handler={
-            "powershell": lambda command: executed.append(command) or "simulated",
+            "powershell": lambda context, command: executed.append(command) or "simulated",
         },
         hooks=create_default_hooks(),
         interaction=interaction,
@@ -463,7 +472,7 @@ def test_execute_tool_approved_dangerous_command_executes_once(tmp_path):
         tmp_path,
         tools_list=[{"name": "powershell"}],
         tool_handler={
-            "powershell": lambda command: executed.append(command) or "simulated",
+            "powershell": lambda context, command: executed.append(command) or "simulated",
         },
         hooks=create_default_hooks(),
         interaction=interaction,
@@ -579,6 +588,27 @@ def test_query_loop_stops_at_max_turns_after_tool_round(monkeypatch, tmp_path):
     assert status == {"reason": "max_turns"}
     assert event_count(runtime.events.events, EventType.RUN_STARTED) == 1
     assert event_count(runtime.events.events, EventType.RUN_COMPLETED) == 1
+
+
+def test_query_loop_allows_unlimited_turns_when_max_turns_is_zero(
+    monkeypatch,
+    tmp_path,
+):
+    requests = []
+
+    class Adapter:
+        def complete(self, request):
+            requests.append(request)
+            return ModelResponse(content=[TextPart("done")], stop_reason="end_turn")
+
+    runtime = make_runtime(tmp_path, max_turns=0)
+    patch_loop_dependencies(monkeypatch, runtime, Adapter())
+
+    _, status = loop.query_loop(runtime)
+
+    assert status == {"reason": "completed"}
+    assert len(requests) == 1
+    assert event_count(runtime.events.events, EventType.TURN_STARTED) == 1
 
 
 def test_query_loop_reacts_to_prompt_too_long_once(monkeypatch, tmp_path):
@@ -715,6 +745,11 @@ def test_query_loop_uses_current_output_budget_after_max_tokens(monkeypatch, tmp
     runtime = make_runtime(tmp_path)
     runtime.state.max_output_tokens = 10
     runtime.state.recovery_count = 0
+    monkeypatch.setattr(
+        loop,
+        "content_config",
+        {"ESCALATED_MAX_OUTPUT_TOKENS": 20},
+    )
     patch_loop_dependencies(monkeypatch, runtime, Adapter())
 
     loop.query_loop(runtime)

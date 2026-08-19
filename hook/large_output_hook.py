@@ -8,8 +8,9 @@
         blocked = hook.trigger_hooks("PostToolUse", block)
 """
 
-import cli
 import config
+from observability.logger import get_logger
+logger = get_logger(__name__)
 
 
 def large_output_hook(ctx, block, output: str):
@@ -26,5 +27,7 @@ def large_output_hook(ctx, block, output: str):
         None
     """
     if len(output) > config.Config().get_content_length()["MAX_INLINE_TOOL_RESULT_TOKENS"]:
-        cli.inform_system_info(f"[WARN] {block.name} 输出过大，长度为 {len(output)}。")
+        logger.debug(
+            f"[HOOK] {block.name} 输出过大，长度为 {len(output)}。"
+        )
     return None

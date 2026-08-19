@@ -12,13 +12,17 @@ import event
 import tools
 import hook
 import builtin
+import config
 
 from api.adapter_factory import create_adapter
 from api.contract import ModelRequest, ModelResponse
 from .runtime import AgentRuntime
 from event.interaction import ApprovalRequest
+from tools.tool_class import ToolContext
 
 from typing import Any
+
+content_config = config.Config().get_content_length()
 
 
 def compact_pipeline(runtime: AgentRuntime):
@@ -49,7 +53,7 @@ def compact_pipeline(runtime: AgentRuntime):
 
     # 执行压缩管线
     messages[:] = tools.tool_result_budget(             # L3 储存大的工具调用输出结果
-        messages,
+        messages = messages,
         artifacts = runtime.artifacts,
     )      
     messages[:] = tools.snip_compact(messages)          # L1 裁剪式压缩
@@ -331,7 +335,9 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
         )
 
         # 执行工具调用
-        output = runtime.tools.execute(block.name, block.input)
+        output = runtime.tools.execute(context = ToolContext(runtime), 
+                                       name = block.name, 
+                                       args = block.input)
 
         # 触发 PostToolUse hook
         runtime.hooks.run(hook.HookEvent.POST_TOOL_USE,
@@ -399,25 +405,24 @@ def query_loop(runtime: AgentRuntime):
     memories_content = runtime.memory.load(runtime, messages)
 
     while True:
-        if max_turns > 0:
-            if state.turn_count >= max_turns:
-                state.messages = messages
-                runtime.events.emit(
-                    event.make_event(
-                        runtime,
-                        event.EventType.RUN_COMPLETED,
-                        trigger=f"max_turns {max_turns} reached",
-                    )
-                )
-                return state, {"reason": "max_turns"}
-            state.turn_count = state.turn_count + 1
+        if max_turns > 0 and state.turn_count >= max_turns:
+            state.messages = messages
             runtime.events.emit(
                 event.make_event(
                     runtime,
-                    event.EventType.TURN_STARTED,
-                    trigger=f"turn {state.turn_count} started",
+                    event.EventType.RUN_COMPLETED,
+                    trigger=f"max_turns {max_turns} reached",
                 )
             )
+            return state, {"reason": "max_turns"}
+        state.turn_count = state.turn_count + 1
+        runtime.events.emit(
+            event.make_event(
+                runtime,
+                event.EventType.TURN_STARTED,
+                trigger=f"turn {state.turn_count} started",
+            )
+        )
 
         system = runtime.prompt.build(runtime)
         context = state.context
@@ -506,7 +511,7 @@ def query_loop(runtime: AgentRuntime):
                 )
                 return state, {"reason": "prompt_too_long"}
             if state.max_output_tokens_override and state.recovery_count < builtin.MAX_RECOVERY_RETRIES:
-                state.max_output_tokens = int(state.max_output_tokens * 2)
+                state.max_output_tokens = content_config["ESCALATED_MAX_OUTPUT_TOKENS"]
                 continue            # Continue Site 3: Max Output Tokens
             continue
 

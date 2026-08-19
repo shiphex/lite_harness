@@ -8,10 +8,8 @@ Typical usage example:
     agent()
 """
 
-from dataclasses import dataclass, field, asdict
 from typing import List, Dict
 
-import cli
 import hook
 import builtin
 import tools
@@ -22,11 +20,16 @@ from .runtime import RunPolicy, state, RuntimeFactory
 from builtin.memory import MemoryPolicy, MemoryMode
 from cli.event_sink import CliEventSink
 from cli.cli_interaction import CliInteraction
-from event.interaction import ApprovalRequest
+from event.sink import EventSink
+from event.interaction import Interaction
 
 
 
-def create_master_runtime(history: List, context: Dict):
+def create_master_runtime(history: List, 
+                          context: Dict,
+                          events: EventSink,
+                          interaction: Interaction,
+                        ):
     """ 创建主 Agent 的运行时环境。
 
     Args:
@@ -44,7 +47,7 @@ def create_master_runtime(history: List, context: Dict):
     )
     content_config = config.Config().get_content_length()
     agent_RunPolicy = RunPolicy(max_turns = 300,
-                                prompt = "",
+                                prompt = "你是一个编码助手",
                                 model = configured_model,
                                 fallback_model = fallback_model,
                                 tools_list = tools.TOOLS_LIST, 
@@ -76,11 +79,12 @@ def create_master_runtime(history: List, context: Dict):
         memory_policy = memoryPolicy,
         workspace = config.Config().get_path_config("project_path"),
         session_id = None,
-        events = CliEventSink(),
-        interaction = CliInteraction(),
+        events = events,
+        interaction = interaction,
     )
     
     return runtime
+
 
 def master_agent():
     """ 主 Agent 的顶层入口 object.
@@ -101,9 +105,12 @@ def master_agent():
     # 初始化历史记录
     history = []
     # 初始化上下文
-    context = builtin.update_context({}, [])
+    context = builtin.update_context({})
 
-    runtime = create_master_runtime(history, context)
+    runtime = create_master_runtime(history, 
+                                    context,
+                                    events=CliEventSink(),
+                                    interaction=CliInteraction())
 
     # 告知用户系统信息
     runtime.events.emit(
@@ -121,7 +128,8 @@ def master_agent():
             
         except (EOFError, KeyboardInterrupt):
             break
-        if user_input.strip().lower() in ("q", "exit", " "):
+        normalized_input = user_input.strip().lower()
+        if not normalized_input or normalized_input in ("q", "exit"):
             break
         
         # 执行 UserPromptSubmit hook
@@ -135,12 +143,12 @@ def master_agent():
         history.append({"role": "user", "content": user_input})
 
         # 执行 agent_loop 工作循环
-        runtime.state.turn_count = 0
+        runtime.begin_run()
         agent_state, status = query_loop(runtime)
 
         # 更新上下文
         history = agent_state.messages
-        context = builtin.update_context(context, history, memory_index=runtime.memory.index_path)
+        context = builtin.update_context(context, memory_index=runtime.memory.index_path)
 
         # 执行系统输出
         response = next(

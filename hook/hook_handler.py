@@ -13,7 +13,6 @@ Typical usage example:
 from .context_inject_hook import context_inject_hook
 from .large_output_hook import large_output_hook
 from .permission_hook import permission_hook
-from .log_hook import log_hook
 from .summary_hook import summary_hook
 
 from enum import Enum
@@ -208,6 +207,5 @@ def trigger_hooks(event: str, *args):   # args 收集调用时传入的额外参
 
 register_hook("UserPromptSubmit", context_inject_hook)
 register_hook("PreToolUse", permission_hook)
-# register_hook("PreToolUse", log_hook)
 register_hook("PostToolUse", large_output_hook)
 register_hook("Stop", summary_hook)

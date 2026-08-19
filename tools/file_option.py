@@ -11,6 +11,7 @@ Typical usage example:
 
 from pathlib import Path
 import config
+from .tool_class import ToolContext
 
 # 获取项目根目录
 WORKDIR = config.Config().get_path_config("project_path")
@@ -40,7 +41,7 @@ def safe_path(p: str) -> Path:
     return path
 
 
-def run_read(path: str, limit: int = 200) -> str:   # | None = None 表示 limit 可以是 None，也可以是 int 类型的(联合类型)
+def run_read(context: ToolContext, path: str, limit: int = 200) -> str:   # | None = None 表示 limit 可以是 None，也可以是 int 类型的(联合类型)
     """ 读取文件内容工具. 
     
     该函数用于读取文件内容，返回文件内容的前 limit 行。
@@ -71,7 +72,7 @@ def run_read(path: str, limit: int = 200) -> str:   # | None = None 表示 limit
         return f"Error: 读取文件 {path} 失败：{e}"
 
 
-def run_write(path: str, content: str) -> str:
+def run_write(context: ToolContext, path: str, content: str) -> str:
     """ 写入文件内容工具. 
 
     该函数用于写入文件内容。
@@ -102,7 +103,7 @@ def run_write(path: str, content: str) -> str:
 
 
 # edit_file 工具执行
-def run_edit(path: str, old_text: str, new_text: str) -> str:
+def run_edit(context: ToolContext, path: str, old_text: str, new_text: str) -> str:
     """ 编辑文件内容工具. 
 
     该函数用于编辑文件内容。
@@ -131,7 +132,7 @@ def run_edit(path: str, old_text: str, new_text: str) -> str:
         return f"编辑文件 {path} 失败：{e}"
 
 
-def run_glob(pattern: str) -> str:
+def run_glob(context: ToolContext, pattern: str) -> str:
     """ 搜索文件工具. 
 
     该函数用于在当前工作目录 WORKDIR 下面查找符合通配符模式的文件。

@@ -16,7 +16,7 @@ def _policy():
         max_turns=1,
         model={"api": "fake", "model_name": "model"},
         tools_list=[{"name": "demo_tool"}],
-        tool_handler={"demo_tool": lambda: "ok"},
+        tool_handler={"demo_tool": lambda context: "ok"},
     )
 
 
@@ -78,6 +78,41 @@ def test_runtime_factory_preserves_injected_runtime_components(tmp_path):
     assert runtime.interaction is interaction
 
 
+def test_begin_run_resets_per_run_state_without_clearing_conversation(tmp_path):
+    runtime = RuntimeFactory.create(
+        agent_name="agent",
+        policy=_policy(),
+        state=state(
+            messages=[{"role": "user", "content": "hello"}],
+            context={"memory": "keep"},
+            max_output_tokens=123,
+            turn_count=7,
+            max_output_tokens_override=True,
+            recovery_count=2,
+            has_attempted_reactive_compact=True,
+            current_model={"api": "fake", "model_name": "model"},
+            consecutive_529=2,
+        ),
+        memory_policy=MemoryPolicy(
+            mode=MemoryMode.READ_WRITE,
+            namespace="runtime",
+        ),
+        workspace=tmp_path,
+        session_id="session",
+    )
+
+    runtime.begin_run()
+
+    assert runtime.state.turn_count == 0
+    assert runtime.state.max_output_tokens_override is False
+    assert runtime.state.has_attempted_reactive_compact is False
+    assert runtime.state.recovery_count == 0
+    assert runtime.state.consecutive_529 == 0
+    assert runtime.state.messages == [{"role": "user", "content": "hello"}]
+    assert runtime.state.context == {"memory": "keep"}
+    assert runtime.state.max_output_tokens == 123
+
+
 def test_prompt_builder_uses_runtime_memory_index_and_updates_context(tmp_path, monkeypatch):
     runtime = RuntimeFactory.create(
         agent_name="agent",
@@ -102,11 +137,11 @@ def test_prompt_builder_uses_runtime_memory_index_and_updates_context(tmp_path, 
     )
     captured = {}
 
-    def capture_prompt(current_runtime, context):
+    def capture_prompt(builder, current_runtime, context):
         captured["context"] = context
         return "system"
 
-    monkeypatch.setattr("builtin.load_prompt.get_system_prompt", capture_prompt)
+    monkeypatch.setattr(PromptBuilder, "get_system_prompt", capture_prompt)
 
     prompt = runtime.prompt.build(runtime)
 

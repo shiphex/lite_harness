@@ -11,15 +11,25 @@ import time
 import yaml
 import re
 import json
-import api
-import cli
 import config
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
 from api.adapter_factory import create_adapter
-from api.contract import ModelRequest, ModelResponse
+from api.contract import ModelRequest
+
+from observability.logger import get_logger
+logger = get_logger(__name__)
+
+
+def _runtime_log_context(runtime):
+    state = getattr(runtime, "state", None)
+    return (
+        getattr(runtime, "session_id", "unknown"),
+        getattr(runtime, "agent_id", "unknown"),
+        getattr(state, "turn_count", 0),
+    )
 
 
 class MemoryMode(str, Enum):
@@ -435,7 +445,9 @@ def extract_memories(self, runtime, messages: list):
 
         # 解析 JSON，排除空文本段
         if not match:
-            cli.inform_system_info("\n[Memory: 提取失败] 模型未返回 JSON 数组")
+            logger.debug("calling model session=%s agent=%s turn=%d [Memory: 提取失败] 模型未返回 JSON 数组",
+                         *_runtime_log_context(runtime),
+            )
             return False
         items = json.loads(match.group())
         if not items:
@@ -451,11 +463,17 @@ def extract_memories(self, runtime, messages: list):
                 write_memory_file(self, name, mem_type, desc, body)
                 count += 1
         if count:
-            cli.inform_system_info(f"\n[Memory: 成功提取 {count} 条新记忆]")
+            logger.debug("calling model session=%s agent=%s turn=%d [Memory: 提取成功] 成功提取 %d 条新记忆",
+             *_runtime_log_context(runtime),
+             count,
+            )
             return True
         return False
     except Exception as e:
-        cli.inform_system_info(f"\n[Memory: 提取失败] {e}")
+        logger.debug("calling model session=%s agent=%s turn=%d [Memory: 提取失败] %s",
+             *_runtime_log_context(runtime),
+             str(e),
+        )
         return False
 
 
@@ -529,9 +547,18 @@ def consolidate_memories(self, runtime):
             if desc and body:
                 write_memory_file(self, name, mem_type, desc, body)
 
-        cli.inform_system_info(f"\n[Memory: 成功整理 {len(files)} → {len(items)} 条记忆]")
+        logger.debug(
+                     "calling model session=%s agent=%s turn=%d "
+                     "[Memory: 成功整理 %d -> %d 条记忆]",
+                     *_runtime_log_context(runtime),
+                     len(files),
+                     len(items),
+                )
         return True
 
     except Exception as e:
-        cli.inform_system_info(f"\n[Memory: 整理失败] {e}")
+        logger.debug("calling model session=%s agent=%s turn=%d \n[Memory: 整理失败] %s",
+                         *_runtime_log_context(runtime),
+                     str(e),
+                )
         return False

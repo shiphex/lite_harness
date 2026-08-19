@@ -12,7 +12,8 @@ Typical usage example:
 
 import ast
 import json
-import cli
+from .tool_class import ToolContext
+import event
 
 
 # reminder 机制
@@ -63,7 +64,7 @@ def _normalize_todos(todos):
 
 # todo_write 工具执行
     # 任务状态：pending 待办, in_progress 进行中, completed 已完成
-def run_todo_write(todos: list) -> str:
+def run_todo_write(context: ToolContext, todos: list) -> str:
     """ 设计任务规划。
 
     该函数用于设计任务规划。
@@ -88,6 +89,13 @@ def run_todo_write(todos: list) -> str:
     for t in CURRENT_TODOS:
         icon = {"pending": " ", "in_progress": "\033[36m▸\033[0m", "completed": "\033[32m✓\033[0m"}[t["status"]]   # 把整个大字典写在方括号前面，直接根据键取值
         lines.append(f"    [{icon}] {t['content']}")
-    cli.put_agent_output("\n".join(lines))     # 打印格式化后的任务列表，在每个任务间添加换行符
+   # 打印格式化后的任务列表，在每个任务间添加换行符
+    context.runtime.events.emit(
+        event.make_event(
+            context.runtime,
+            event.EventType.TODO_UPDATED,
+            todos=todos,
+        )
+    )
 
     return f"更新 {len(CURRENT_TODOS)} 个任务。"

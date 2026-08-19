@@ -12,8 +12,9 @@ Typical usage example:
 
 import json
 import config
-import cli
 from pathlib import Path
+from observability.logger import get_logger
+logger = get_logger(__name__)
 
 try:
     from tools.load_skill import SKILL_REGISTRY
@@ -37,19 +38,78 @@ MEMORY_INDEX = config.Config().get_path_config("memory_index")
 
 class PromptBuilder:
 
+    def __init__(self):
+        self._last_context_key = None
+        self._last_prompt = None
+
     def build(self, 
               runtime, 
         ) -> str:
 
         context = update_context(
             runtime.state.context,
-            runtime.state.messages,
             memory_index=runtime.memory.index_path,
         )
         runtime.state.context = context
-        system_prompt = get_system_prompt(runtime, context)
+        system_prompt = self.get_system_prompt(runtime, context)
 
         return system_prompt
+
+    # 获得系统提示词
+    def get_system_prompt(self, runtime, context: dict) -> str:
+        """获取当前上下文对应的系统提示词。
+
+        缓存键由 ``context`` 的稳定 JSON 表示生成。因此，键顺序不同但内容
+        等价的字典会复用同一份提示词；JSON 原生不支持的值会通过 ``str`` 转换。
+
+        Args:
+            context (dict): 用于组装提示词的运行时上下文。
+
+        Returns:
+            str: 上下文未变化时返回缓存提示词，否则返回重新组装的提示词。
+        """
+
+        # 将 Python 对象序列化为 JSON 字符串。
+        # sort_keys=True: 字典的键强制按字母升序排序后输出 JSON。
+        # ensure_ascii=False: 直接输出原始中文 / 特殊字符，不转义成 Unicode 转义字符。
+        # default=str: 处理 JSON 原生不支持序列化的对象，如 None、datetime 等。
+        runtime_key = {
+            "workspace": str(runtime.paths.workspace),
+            "tools": runtime.policy.tools_list,
+        }
+        key = json.dumps(
+            {"runtime": runtime_key, "context": context},
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+        )
+        if key == self._last_context_key and self._last_prompt:
+            logger.debug(
+                "calling model session=%s agent=%s turn=%d "
+                "[cache init]系统提示词未变化",
+                runtime.session_id,
+                runtime.agent_id,
+                runtime.state.turn_count,
+            )
+            return self._last_prompt
+
+        # 更新系统提示词
+        self._last_context_key = key
+        self._last_prompt = assemble_system_prompt(runtime, context)
+
+        # 打印加载的段落
+        loaded = ["identity", "tools", "workspace"]
+        if context.get("memories"):
+            loaded.append("memory")
+        logger.debug(
+            "calling model session=%s agent=%s turn=%d "
+            "system prompt assembled: sections=%s",
+            runtime.session_id,
+            runtime.agent_id,
+            runtime.state.turn_count,
+            loaded,
+        )
+        return self._last_prompt
  
 
 
@@ -115,7 +175,7 @@ def build_system() -> str:
 # ═══════════════════════════════════════════════════════════
 
 PROMPT_SECTIONS = {
-    "identity": "你是是一个编码助手，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。",
+    "identity": "当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。",
     "tools": f"当前可用的 tool 有：{', '.join([tool['name'] for tool in TOOLS_LIST])}",
     "workspace": f"当前工作目录是 {WORKDIR}",
     "skill": f"当前可用的 skill 有：{list_skill()}",
@@ -136,6 +196,9 @@ def assemble_system_prompt(runtime, context: dict) -> str:
     """
     sections = []
 
+    if runtime.policy.prompt:
+        sections.append(runtime.policy.prompt)
+
     sections.append(PROMPT_SECTIONS["identity"])
     sections.append(f"当前可用的 tool 有：{', '.join([tool['name'] for tool in runtime.policy.tools_list])}")
     sections.append(f"当前工作目录是 {runtime.paths.workspace}")
@@ -149,75 +212,22 @@ def assemble_system_prompt(runtime, context: dict) -> str:
     return "\n\n".join(sections)
 
 
-_last_context_key = None
-_last_prompt = None
-
-# 获得系统提示词
-def get_system_prompt(runtime, context: dict) -> str:
-    """获取当前上下文对应的系统提示词。
-
-    缓存键由 ``context`` 的稳定 JSON 表示生成。因此，键顺序不同但内容
-    等价的字典会复用同一份提示词；JSON 原生不支持的值会通过 ``str`` 转换。
-
-    Args:
-        context (dict): 用于组装提示词的运行时上下文。
-
-    Returns:
-        str: 上下文未变化时返回缓存提示词，否则返回重新组装的提示词。
-    """
-    global _last_context_key, _last_prompt
-
-    # 将 Python 对象序列化为 JSON 字符串。
-    # sort_keys=True: 字典的键强制按字母升序排序后输出 JSON。
-    # ensure_ascii=False: 直接输出原始中文 / 特殊字符，不转义成 Unicode 转义字符。
-    # default=str: 处理 JSON 原生不支持序列化的对象，如 None、datetime 等。
-    runtime_key = {
-        "workspace": str(runtime.paths.workspace),
-        "tools": runtime.policy.tools_list,
-    }
-    key = json.dumps(
-        {"runtime": runtime_key, "context": context},
-        sort_keys=True,
-        ensure_ascii=False,
-        default=str,
-    )
-    if key == _last_context_key and _last_prompt:
-        cli.put_agent_other_info("  \033[90m[cache init]系统提示词未变化\033[0m")
-        return _last_prompt
-
-    # 更新系统提示词
-    _last_context_key = key
-    _last_prompt = assemble_system_prompt(runtime, context)
-
-    # 打印加载的段落
-    loaded = ["identity", "tools", "workspace"]
-    if context.get("memories"):
-        loaded.append("memory")
-    cli.put_agent_other_info(f"  \033[32m[assemble] 片段：{', '.join(loaded)}\033[0m")
-    
-    return _last_prompt
-
-
 # 更新上下文
 def update_context(
     context: dict,
-    messages: list,
     memory_index: Path | None = None,
 ) -> dict:
     """构建提示词组装器需要的运行时上下文。
 
     Args:
-        context (dict): 现有会话上下文。该参数用于保持调用接口兼容，
-            函数不会修改它。
-        messages (list): 会话消息列表。该参数用于保持调用接口兼容，
-            函数不会修改它。
+        context (dict): 现有会话上下文。函数不会修改原字典。
+        memory_index (Path | None): 可选的记忆索引路径。
 
     Returns:
-        dict: 包含已启用工具名、工作目录路径，以及可选记忆索引内容的上下文。
+        dict: 保留已有上下文并更新记忆索引内容。
     """
     memories = read_memory_index(memory_index)
     return {
-        "enabled_tools": list(TOOLS_HANDLERS.keys()),
-        "workspace": str(WORKDIR),
+        **context,
         "memories": memories,
     }

@@ -10,7 +10,6 @@ Typical usage example:
     messages[:] = compact_history(messages)
 """
 
-import time
 import json
 import config
 import api
@@ -359,4 +358,3 @@ def reactive_compact(messages, artifacts: ArtifactStore):
 
     return [{"role": "user", "content": f"[重新执行压缩]\n\n{summary}"}, *messages[tail_start:]]
 
-    

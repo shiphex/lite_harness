@@ -130,6 +130,14 @@ class AgentRuntime:
 
     interaction: Interaction
 
+    def begin_run(self):
+        self.state.turn_count = 0
+        self.state.max_output_tokens_override = False
+        self.state.has_attempted_reactive_compact = False
+        self.state.recovery_count = 0
+        self.state.consecutive_529 = 0
+
+
 
 @dataclass
 class RuntimeFactory:

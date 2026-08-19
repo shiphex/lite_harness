@@ -11,7 +11,7 @@ from .file_option import run_read, run_write, run_edit, run_glob
 from .todo_write import run_todo_write
 from .subagent import spawn_subagent
 from .load_skill import load_skill
-
+from .tool_class import ToolContext
 
 
 class ToolExecutor:
@@ -22,12 +22,12 @@ class ToolExecutor:
         }
         self.workspace = workspace
 
-    def execute(self, name: str, args: dict):
+    def execute(self, context: ToolContext, name: str, args: dict):
         if name not in self.allowed_tools:
             raise PermissionError(f"Tool not allowed: {name}")
 
         handler = self.registry.get(name)
-        return handler(**args) if handler else f"Unknown: {name}"
+        return handler(context, **args) if handler else f"Unknown: {name}"
        
 
 
@@ -110,18 +110,3 @@ ADVANCED_TOOLS_HANDLERS = {
 }
 
 TOOLS_HANDLERS = STANDARD_TOOLS_HANDLERS | ADVANCED_TOOLS_HANDLERS
-
-
-# 工具调用函数
-def call_tool(tool_name: str, tool_input: dict):
-    """ 调用指定工具。
-
-    Args:
-        tool_name: 工具名称。
-        tool_input: 工具输入参数。
-
-    Returns:
-        工具输出结果。
-    """
-    handler = TOOLS_HANDLERS.get(tool_name)
-    return handler(**tool_input) if handler else f"Unknown: {tool_name}"

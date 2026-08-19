@@ -12,6 +12,7 @@ import cli
 import config
 import hook
 from . import tool_handler
+from .tool_class import ToolContext
 
 
 WORKDIR = config.Config().get_path_config("project_path")
@@ -43,7 +44,7 @@ def extract_text(content) -> str:
     return "\n".join(getattr(b, "text", "") for b in content if getattr(b, "type", "") == "text")
 
 
-def spawn_subagent(description: str) -> str:
+def spawn_subagent(context: ToolContext, description: str) -> str:
     """ subagent 循环函数。
 
     subagent 的 loop 循环
@@ -91,7 +92,11 @@ def spawn_subagent(description: str) -> str:
                 # 获取返回的需调用工具的名字，再从 STANDARD_TOOLS_HANDLERS 中获取对应的函数指针
                 handler = tool_handler.STANDARD_TOOLS_HANDLERS.get(block.name)
                 # 将 block.input 的值作为参数传递给 handler 指向的函数，并返回函数执行结果   
-                output = handler(**block.input) if handler else f"Unknown: {block.name}"
+                output = (
+                    handler(context, **block.input)
+                    if handler
+                    else f"Unknown: {block.name}"
+                )
 
                 # 触发 PostToolUse hook
                 hook.trigger_hooks("PostToolUse", block, output)

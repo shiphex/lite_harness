@@ -9,6 +9,9 @@ import time
 
 import config
 
+from observability.logger import get_logger
+logger = get_logger(__name__)
+
 
 model_config = config.Config().get_model_config()
 default_content_length = config.Config().get_content_length()
@@ -78,7 +81,7 @@ def with_llm_retry(fn, state, RunPolicy):
     切换为该模型。
     """
 
-    for attempt in range(MAX_RETRIES):
+    for attempt in range(MAX_RETRIES + 1):
         # 尝试执行函数
         try:
             result = fn()
@@ -90,10 +93,15 @@ def with_llm_retry(fn, state, RunPolicy):
 
             # 处理 429 限流错误
             if "ratelimit" in name.lower() or "429" in msg:
+                if attempt >= MAX_RETRIES:
+                    break
+
                 delay = retry_delay(attempt)
-                print(
-                    f"  \033[33m[429 rate limit] retry {attempt + 1}/{MAX_RETRIES} "
-                    f"wait {delay:.1f}s\033[0m"
+                logger.info(
+                    "  \033[33m[429 rate limit] retry %d/%d wait %.1fs\033[0m",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
                 )
                 time.sleep(delay)
                 continue
@@ -105,21 +113,27 @@ def with_llm_retry(fn, state, RunPolicy):
                     if RunPolicy.fallback_model:
                         state.current_model = dict(RunPolicy.fallback_model)
                         state.consecutive_529 = 0
-                        print(
+                        logger.info(
                             f"  \033[33m[529 x{MAX_CONSECUTIVE_529}] "
                             f"switching to fallback model "
                             f"{RunPolicy.fallback_model['model_name']} and retrying\033[0m"
                         )
                     else:
                         state.consecutive_529 = 0
-                        print(
+                        logger.debug(
                             f"  \033[33m[529 x{MAX_CONSECUTIVE_529}] "
                             "no fallback model configured; retrying\033[0m"
                         )
+                        
+                if attempt >= MAX_RETRIES:
+                    break
+
                 delay = retry_delay(attempt)
-                print(
-                    f"  \033[33m[529 overloaded] retry {attempt + 1}/{MAX_RETRIES} "
-                    f"wait {delay:.1f}s\033[0m"
+                logger.info(
+                    "  \033[33m[529 overloaded] retry %d/%d wait %.1fs\033[0m",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
                 )
                 time.sleep(delay)
                 continue
@@ -155,9 +169,11 @@ def with_retry(fn, state: RecoveryState):
             # 处理 429 限流错误
             if "ratelimit" in name.lower() or "429" in msg:
                 delay = retry_delay(attempt)
-                print(
-                    f"  \033[33m[429 rate limit] retry {attempt + 1}/{MAX_RETRIES} "
-                    f"wait {delay:.1f}s\033[0m"
+                logger.info(
+                    "  \033[33m[429 rate limit] retry %d/%d wait %.1fs\033[0m",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
                 )
                 time.sleep(delay)
                 continue
@@ -169,21 +185,23 @@ def with_retry(fn, state: RecoveryState):
                     if model_config["fallback_model_name"]:
                         state.current_model = model_config["fallback_model_name"]
                         state.consecutive_529 = 0
-                        print(
+                        logger.info(
                             f"  \033[33m[529 x{MAX_CONSECUTIVE_529}] "
                             f"switching to fallback model "
                             f"{model_config['fallback_model_name']} and retrying\033[0m"
                         )
                     else:
                         state.consecutive_529 = 0
-                        print(
+                        logger.info(
                             f"  \033[33m[529 x{MAX_CONSECUTIVE_529}] "
                             "no fallback model configured; retrying\033[0m"
                         )
                 delay = retry_delay(attempt)
-                print(
-                    f"  \033[33m[529 overloaded] retry {attempt + 1}/{MAX_RETRIES} "
-                    f"wait {delay:.1f}s\033[0m"
+                logger.info(
+                    "  \033[33m[529 overloaded] retry %d/%d wait %.1fs\033[0m",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
                 )
                 time.sleep(delay)
                 continue
@@ -219,7 +237,7 @@ def output_tokens_too_long_error(messages: list, state):
     # 如果未升级到应急状态，则先升级到应急状态（提高 max_tokens 大小）。
     if not state.max_output_tokens_override:
         state.max_output_tokens_override = True
-        print(
+        logger.debug(
             "  \033[33m[max_tokens] escalating output budget "
             f"{default_content_length['MAIN_OUTPUT_TOKENS']} -> "
             f"{default_content_length['ESCALATED_MAX_OUTPUT_TOKENS']}\033[0m"
@@ -230,11 +248,11 @@ def output_tokens_too_long_error(messages: list, state):
     if state.recovery_count < MAX_RECOVERY_RETRIES:
         messages.append({"role": "user", "content": CONTINUATION_PROMPT})
         state.recovery_count += 1
-        print(f"  \033[33m[max_tokens] continuing {state.recovery_count}/{MAX_RECOVERY_RETRIES}\033[0m")
+        logger.debug(f"  \033[33m[max_tokens] continuing {state.recovery_count}/{MAX_RECOVERY_RETRIES}\033[0m")
         return state, messages
 
     # 如果已超过最大恢复次数，则提示用户。
-    print("  \033[31m[max_tokens] reached max recovery attempts.\033[0m")
+    logger.error("  \033[31m[max_tokens] reached max recovery attempts.\033[0m")
     return state, messages
 
 
@@ -249,7 +267,7 @@ def max_tokens_too_long_error(messages: list, state: RecoveryState):
     # 如果未升级到应急状态，则先升级到应急状态（提高 max_tokens 大小）。
     if not state.has_escalated:
         state.has_escalated = True
-        print(
+        logger.debug(
             "  \033[33m[max_tokens] escalating output budget "
             f"{default_content_length['MAIN_OUTPUT_TOKENS']} -> "
             f"{default_content_length['ESCALATED_MAX_OUTPUT_TOKENS']}\033[0m"
@@ -260,9 +278,9 @@ def max_tokens_too_long_error(messages: list, state: RecoveryState):
     if state.recovery_count < MAX_RECOVERY_RETRIES:
         messages.append({"role": "user", "content": CONTINUATION_PROMPT})
         state.recovery_count += 1
-        print(f"  \033[33m[max_tokens] continuing {state.recovery_count}/{MAX_RECOVERY_RETRIES}\033[0m")
+        logger.debug(f"  \033[33m[max_tokens] continuing {state.recovery_count}/{MAX_RECOVERY_RETRIES}\033[0m")
         return state, messages
 
     # 如果已超过最大恢复次数，则提示用户。
-    print("  \033[31m[max_tokens] reached max recovery attempts.\033[0m")
+    logger.error("  \033[31m[max_tokens] reached max recovery attempts.\033[0m")
     return state, messages
