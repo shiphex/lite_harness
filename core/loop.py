@@ -405,25 +405,24 @@ def query_loop(runtime: AgentRuntime):
     memories_content = runtime.memory.load(runtime, messages)
 
     while True:
-        if max_turns > 0:
-            if max_turns > 0 and state.turn_count >= max_turns:
-                state.messages = messages
-                runtime.events.emit(
-                    event.make_event(
-                        runtime,
-                        event.EventType.RUN_COMPLETED,
-                        trigger=f"max_turns {max_turns} reached",
-                    )
-                )
-                return state, {"reason": "max_turns"}
-            state.turn_count = state.turn_count + 1
+        if max_turns > 0 and state.turn_count >= max_turns:
+            state.messages = messages
             runtime.events.emit(
                 event.make_event(
                     runtime,
-                    event.EventType.TURN_STARTED,
-                    trigger=f"turn {state.turn_count} started",
+                    event.EventType.RUN_COMPLETED,
+                    trigger=f"max_turns {max_turns} reached",
                 )
             )
+            return state, {"reason": "max_turns"}
+        state.turn_count = state.turn_count + 1
+        runtime.events.emit(
+            event.make_event(
+                runtime,
+                event.EventType.TURN_STARTED,
+                trigger=f"turn {state.turn_count} started",
+            )
+        )
 
         system = runtime.prompt.build(runtime)
         context = state.context

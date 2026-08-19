@@ -81,7 +81,7 @@ def with_llm_retry(fn, state, RunPolicy):
     切换为该模型。
     """
 
-    for attempt in range(MAX_RETRIES):
+    for attempt in range(MAX_RETRIES + 1):
         # 尝试执行函数
         try:
             result = fn()
@@ -93,6 +93,9 @@ def with_llm_retry(fn, state, RunPolicy):
 
             # 处理 429 限流错误
             if "ratelimit" in name.lower() or "429" in msg:
+                if attempt >= MAX_RETRIES:
+                    break
+
                 delay = retry_delay(attempt)
                 logger.info(
                     "  \033[33m[429 rate limit] retry %d/%d wait %.1fs\033[0m",
@@ -121,6 +124,10 @@ def with_llm_retry(fn, state, RunPolicy):
                             f"  \033[33m[529 x{MAX_CONSECUTIVE_529}] "
                             "no fallback model configured; retrying\033[0m"
                         )
+                        
+                if attempt >= MAX_RETRIES:
+                    break
+
                 delay = retry_delay(attempt)
                 logger.info(
                     "  \033[33m[529 overloaded] retry %d/%d wait %.1fs\033[0m",
