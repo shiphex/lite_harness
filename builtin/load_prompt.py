@@ -48,7 +48,6 @@ class PromptBuilder:
 
         context = update_context(
             runtime.state.context,
-            runtime.state.messages,
             memory_index=runtime.memory.index_path,
         )
         runtime.state.context = context
@@ -216,7 +215,6 @@ def assemble_system_prompt(runtime, context: dict) -> str:
 # 更新上下文
 def update_context(
     context: dict,
-    messages: list,
     memory_index: Path | None = None,
 ) -> dict:
     """构建提示词组装器需要的运行时上下文。
@@ -232,7 +230,6 @@ def update_context(
     """
     memories = read_memory_index(memory_index)
     return {
-        "enabled_tools": list(TOOLS_HANDLERS.keys()),
-        "workspace": str(WORKDIR),
+        **context,
         "memories": memories,
     }
