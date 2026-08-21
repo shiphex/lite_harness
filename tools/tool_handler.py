@@ -9,7 +9,7 @@ Typical usage example:
 from .powershell import run_powershell
 from .file_option import run_read, run_write, run_edit, run_glob
 from .todo_write import run_todo_write
-from .subagent import spawn_subagent
+from .subagent import spawn_subagent, run_subagent
 from .load_skill import load_skill
 from .tool_class import ToolContext
 
@@ -106,7 +106,7 @@ STANDARD_TOOLS_HANDLERS = {
 # 高级工具分发映射
 ADVANCED_TOOLS_HANDLERS = {
     "todo_write":   run_todo_write,
-    "subagent":     spawn_subagent,
+    "subagent":     run_subagent,
 }
 
 TOOLS_HANDLERS = STANDARD_TOOLS_HANDLERS | ADVANCED_TOOLS_HANDLERS
