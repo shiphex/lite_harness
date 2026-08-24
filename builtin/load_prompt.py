@@ -201,6 +201,16 @@ def assemble_system_prompt(runtime, context: dict) -> str:
 
     sections.append(PROMPT_SECTIONS["identity"])
     sections.append(f"当前可用的 tool 有：{', '.join([tool['name'] for tool in runtime.policy.tools_list])}")
+    if "todo_write" in runtime.policy.tools_list:
+        sections.append("在开始任何多步骤任务之前，请使用 todo_write 来规划您的步骤。")
+    if "create_task" in runtime.policy.tools_list \
+       and "update_task" in runtime.policy.tools_list \
+       and "list_tasks" in runtime.policy.tools_list \
+       and "get_task" in runtime.policy.tools_list \
+       and "claim_task" in runtime.policy.tools_list \
+       and "complete_task" in runtime.policy.tools_list:
+        sections.append("使用 task 系列的工具跟踪依赖关系和进度。首先，创建所有任务节点。")
+        sections.append("在 create_task 返回运行时生成的 ID 之后，使用 update_task 并使用这些确切的 ID 来添加依赖项。")
     sections.append(f"当前工作目录是 {runtime.paths.workspace}")
     sections.append(PROMPT_SECTIONS["skill"])
     sections.append(PROMPT_SECTIONS["memory"])

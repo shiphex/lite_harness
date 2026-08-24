@@ -116,6 +116,7 @@ class Config():
         self.path_config = {
             "project_path": WORKDIR,
             "skill_dir": WORKDIR / ".agents" / "skills",
+            "tasks_path": WORKDIR / ".agents" / ".tasks",
             "tool_result_dir": WORKDIR / ".agents" / ".task_output" / "tool_results",
             "transcript_dir": WORKDIR / ".agents" / "transcripts",
             "memory_dir": WORKDIR / ".agents" / ".memory",
