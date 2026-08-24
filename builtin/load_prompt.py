@@ -209,7 +209,7 @@ def assemble_system_prompt(runtime, context: dict) -> str:
        and "get_task" in runtime.policy.tools_list \
        and "claim_task" in runtime.policy.tools_list \
        and "complete_task" in runtime.policy.tools_list:
-        sections.append("使用 task 系列的工具跟踪依赖关系和进度。首先，创建所有任务节点。")
+        sections.append("对于任何多步骤任务，使用 task 系列工具跟踪依赖关系和进度。首先，创建所有任务节点。")
         sections.append("在 create_task 返回运行时生成的 ID 之后，使用 update_task 并使用这些确切的 ID 来添加依赖项。")
     sections.append(f"当前工作目录是 {runtime.paths.workspace}")
     sections.append(PROMPT_SECTIONS["skill"])

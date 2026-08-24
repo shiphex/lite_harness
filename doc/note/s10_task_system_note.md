@@ -49,3 +49,34 @@ pending ──claim──→ in_progress ──complete──→ completed
 claim / complete 是动作，pending / in_progress / completed 是状态：
 - claim_task: pending → in_progress。设置 owner，开始工作。
 - complete_task: in_progress → completed。把任务标记为完成，并解锁下游。
+
+
+# 2. 工具系统
+
+## 2.1 创建任务
+TaskStore.create 检查 subject，分配随机 ID，再把任务写入 .tasks/{id}.json。新任务的 blockedBy 固定为空，工具结果会把运行时生成的 ID 返回给模型。
+
+## 2.2 更新任务
+更新任务将 create_task 返回的 ID 作为参数，调用 update_task 为以及存在的任务添加依赖关系。
+
+任务图采用两阶段构建：
+- 先创建所有节点
+- 再使用 create_task 返回的 ID 调用 update_task 添加边。
+
+模型可能在一条回复里同时发出多个工具调用，而这些同级调用在任何工具结果产生前就已经确定，因此某个 create_task 无法直接使用另一个调用刚生成的 ID。
+
+## 2.3 列出所有任务
+list_tasks 返回所有任务的 ID、subject、status、owner 和 blockedBy。
+
+## 2.4 run_get_task: 查看完整细节
+list_tasks 只显示一行摘要。get_task 返回完整的任务 JSON，包括 description 和依赖细节。跨会话恢复时，Agent 需要读取完整描述才能继续工作。
+
+## 2.5 认领任务
+Agent 开始做一个任务时，调用 claim_task：设置 owner，状态从 pending → in_progress。owner 字段记录谁认领了这个任务。如果任务不是 pending，或者依赖没有完成，就拒绝认领。
+
+## 2.6 完成与解锁
+任务做完后，设为 completed。同时扫描所有其他任务，找出刚刚被解锁的下游任务
+
+### 2.6.1 can_start: 依赖检查
+- 一个任务只能在它的 blockedBy 全部 completed 之后才能开始
+- incomplete_dependencies 读取每个前置任务。只要有一个不是 completed，或者对应文件已经不存在，任务就不能认领。
