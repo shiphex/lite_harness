@@ -221,7 +221,7 @@ def _format_bash_result(output: str, exit_code: int | None) -> str:
     return f"Error: 命令退出码为 {exit_code}\n{output}"
 
 
-def run_bash(command: str, run_in_background: bool = False) -> str:
+def run_bash(context: ToolContext, command: str, run_in_background: bool = False) -> str:
     """ 执行 Bash 命令。
 
     该函数用于执行 Bash 命令。
