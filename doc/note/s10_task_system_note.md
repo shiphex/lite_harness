@@ -80,3 +80,33 @@ Agent 开始做一个任务时，调用 claim_task：设置 owner，状态从 pe
 ### 2.6.1 can_start: 依赖检查
 - 一个任务只能在它的 blockedBy 全部 completed 之后才能开始
 - incomplete_dependencies 读取每个前置任务。只要有一个不是 completed，或者对应文件已经不存在，任务就不能认领。
+
+
+# 3. 运行流程示例
+``` python
+# 第一阶段：创建所有节点并取得运行时 ID
+schema = create_task("setup database schema")
+endpoints = create_task("create API endpoints")
+tests = create_task("write tests")
+docs = create_task("write docs")
+
+# 第二阶段：使用返回的 ID 建立依赖边
+update_task(endpoints.id, addBlockedBy=[schema.id])
+update_task(tests.id, addBlockedBy=[endpoints.id])
+update_task(docs.id, addBlockedBy=[schema.id])
+
+# Agent 认领第一个可做的任务
+claim_task(schema.id)       # ✓ Claimed (无依赖)
+complete_task(schema.id)    # ✓ Completed → 解锁 endpoints, docs
+
+claim_task(endpoints.id)    # ✓ Claimed (schema 已完成)
+complete_task(endpoints.id) # ✓ Completed → 解锁 tests
+
+claim_task(docs.id)         # ✓ Claimed (schema 已完成)
+complete_task(docs.id)      # ✓ Completed
+
+claim_task(tests.id)        # ✓ Claimed (endpoints 已完成)
+complete_task(tests.id)     # ✓ Completed
+```
+每个 create_task 写一个 JSON 文件，update_task、claim_task 和 complete_task 更新文件。  
+跨会话时，.tasks/ 目录还在，Agent 读文件就能恢复进度。
