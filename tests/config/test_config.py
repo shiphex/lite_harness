@@ -4,7 +4,38 @@ from pathlib import Path
 
 import pytest
 
-from config import Config, configure, get_current_args, parse_args, update_config
+from config import (
+    Config,
+    configure,
+    get_current_args,
+    get_system_info,
+    parse_args,
+    update_config,
+)
+
+
+def test_get_system_info_uses_powershell_on_windows(monkeypatch):
+    import config.config as config_module
+
+    monkeypatch.setattr(config_module.platform, "system", lambda: "Windows")
+
+    assert get_system_info() == {
+        "system": "Windows",
+        "shell_name": "PowerShell",
+        "executable": "powershell",
+    }
+
+
+def test_get_system_info_uses_bash_on_linux(monkeypatch):
+    import config.config as config_module
+
+    monkeypatch.setattr(config_module.platform, "system", lambda: "Linux")
+
+    assert get_system_info() == {
+        "system": "Linux",
+        "shell_name": "Bash",
+        "executable": "bash",
+    }
 
 
 def test_parse_args_defaults():
