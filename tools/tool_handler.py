@@ -15,7 +15,6 @@ from .tool_class import ToolContext
 from .task_system import run_create_task, run_update_task, run_list_tasks, run_get_task, run_claim_task, run_complete_task
 
 
-
 class ToolExecutor:
     def __init__(self, registry: dict, allowed_tools: list, workspace):
         self.registry = registry
@@ -35,7 +34,7 @@ class ToolExecutor:
 # 初级工具列表
 STANDARD_TOOLS_LIST = [
     {"name": "powershell", "description": "执行一个 PowerShell 命令。",
-     "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
+     "input_schema": {"type": "object", "properties": {"command": {"type": "string"}, "run_in_background": {"type": "boolean"}}, "required": ["command"]}},
     {"name": "read_file", "description": "读取文件内容。",
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, 
                                                        "limit": {"type": "integer", 
