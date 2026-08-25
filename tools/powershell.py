@@ -188,6 +188,7 @@ def _run_bash_process(command: str) -> tuple[str, int | None]:
         return "Error: Timeout (120s)", None
     except OSError as error:
         return f"Error: {type(error).__name__}: {error}", None
+    # 若进程在执行完毕后未退出，尝试强制进程组退出。
     finally:
         if process is not None:
             try:
@@ -283,7 +284,7 @@ class BackgroundManager:
         thread = threading.Thread(
             target = self._run,
             args = (task_id, command),
-            daemon = True,
+            daemon = True,  # 开启守护线程，主线程退出时自动退出。
         )
         try:
             thread.start()
