@@ -5,6 +5,7 @@ from .config import (
     get_current_args,
     parse_args,
     update_config, 
+    get_system_info,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "get_current_args",
     "parse_args",
     "update_config",
+    "get_system_info",
 ]

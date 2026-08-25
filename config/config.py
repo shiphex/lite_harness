@@ -8,18 +8,36 @@ Typical usage example:
 
 from pathlib import Path
 import argparse
+import platform
+
+
+def get_system_info() -> dict[str, str]:
+    """Return the host platform and the shell used to execute tool commands."""
+    system = platform.system() or "Unknown"
+    if system == "Windows":
+        return {
+            "system": system,
+            "shell_name": "PowerShell",
+            "executable": "powershell",
+        }
+    return {
+        "system": system,
+        "shell_name": "Bash",
+        "executable": "bash",
+    }
 
 
 WORKDIR = Path.cwd()
+SYSTEM_INFO = get_system_info()
 # 设置默认系统提示词
-DEFAULT_SYSTEM_PROMPT = (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。"
+DEFAULT_SYSTEM_PROMPT = (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 {SYSTEM_INFO['system']}。使用 {SYSTEM_INFO['shell_name']} 解决任务。行动，无需解释。"
                          "在开始任何多步骤任务之前，请使用 todo_write 来规划您的步骤。"
                          "随时更新状态。"
                          "对于复杂的子问题，可以使用任务工具生成子智能体。"
 )
 
 # 设置默认子智能体系统提示词
-DEFAULT_SUB_SYSTEM_PROMPT = (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。"
+DEFAULT_SUB_SYSTEM_PROMPT = (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 {SYSTEM_INFO['system']}。使用 {SYSTEM_INFO['shell_name']} 解决任务。行动，无需解释。"
                              "完成分配给你的任务，然后提交一份简明扼要的总结。"
                              "不要再进一步委托子智能体。"
 )

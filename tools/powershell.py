@@ -13,6 +13,7 @@ import threading
 import signal
 import time
 import atexit
+import config
 from .tool_class import ToolContext
 
 
@@ -31,18 +32,84 @@ _shell_process_lock = threading.RLock()
            3、专门用于：同一个函数内部，嵌套调用也需要再次加锁的场景。
 """
 
+def _build_shell_command(command: str) -> list[str]:
+    """ 构建平台对应的命令。
+
+    该函数用于根据当前操作系统，构建对应命令解释器的启动参数。
+
+    Args:
+        command: 要执行的命令。
+
+    Returns:
+        list[str]: 平台对应的命令和启动参数。
+    """
+    system_info = config.get_system_info()
+    if system_info["system"] == "Windows":
+        # Windows 使用 PowerShell 执行命令。
+        return [
+            system_info["executable"],
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-Command",
+            command,
+        ]
+    # Linux 使用 Bash 执行命令，-l 载入登录环境，-c 执行传入的命令字符串。
+    return [system_info["executable"], "-lc", command]
+
+
+def _process_creation_kwargs() -> dict:
+    """ 构建平台对应的进程启动参数。
+
+    该函数用于让命令进程与主进程隔离，便于程序退出或超时时清理子进程。
+
+    Returns:
+        dict: subprocess.Popen 使用的进程启动参数。
+    """
+    if config.get_system_info()["system"] == "Windows":
+        # Windows 使用新的进程组，便于 taskkill 终止整个进程树。
+        creation_flag = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        return {"creationflags": creation_flag} if creation_flag else {}
+    # Linux 使用新的会话，使当前进程成为待清理进程组的组长。
+    return {"start_new_session": True}
+
+
 def _stop_process_group(process: subprocess.Popen) -> None:
     """ 停止进程组。
 
     该函数用于停止进程组。
-    
+
     Args:
         process: 要停止的进程。
     """
-    # 第一轮 SIGTERM（15）：请求进程组里面所有进程正常退出，进程可以做清理工作、保存数据。
+    if config.get_system_info()["system"] == "Windows":
+        # Windows 没有 os.killpg，使用 taskkill 的 /T 参数终止整个进程树。
+        try:
+            result = subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            # taskkill 返回非零状态时，回退到终止当前进程。
+            if getattr(result, "returncode", 0) == 0:
+                return
+            if process.poll() is None:
+                process.terminate()
+        except (FileNotFoundError, OSError):
+            # taskkill 不可用或执行失败时，至少终止当前进程，避免进程残留。
+            try:
+                if process.poll() is None:
+                    process.terminate()
+            except (OSError, AttributeError):
+                pass
+        return
+
+    # Linux 第一轮 SIGTERM（15）：请求进程组里面所有进程正常退出，进程可以做清理工作、保存数据。
     # sleep 0.05 秒，给一点时间让进程组退出。
     # 如果进程组还活着，第二轮发送 SIGKILL(9) 强制杀死进程组。
-    for sig in (signal.SIGTERM, signal.SIGKILL):
+    # 某些非 Linux 环境没有 SIGKILL，此时回退使用 SIGTERM，避免模块加载失败。
+    force_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
+    for sig in (signal.SIGTERM, force_signal):
         try:
             os.killpg(process.pid, sig)     # os.killpg(pgid, signal)：向整个进程组发送信号，而不是单个进程，
                                             # 防止子进程的子进程残留（僵尸 / 孤儿进程）。
@@ -89,33 +156,28 @@ signal.signal(signal.SIGTERM, _handle_termination_signal)
 
 
 def _run_bash_process(command: str) -> tuple[str, int | None]:
-    """ 执行 Bash 命令。
+    """ 执行平台 Shell 命令。
 
-    该函数用于执行 Bash 命令。
+    该函数用于执行 Bash 或 PowerShell 命令。
     
     Args:
-        command: 要执行的 Bash 命令。
+        command: 要执行的平台 Shell 命令。
         
     Returns:
         命令执行结果。
     """
     process = None
     try:
+        # 使用参数列表直接启动命令解释器，避免 shell=True 在不同平台上的参数解析差异。
         process = subprocess.Popen(
-            [
-                "powershell",
-                "-NoProfile",
-                "-ExecutionPolicy", "Bypass",
-                "-Command",
-                command,
-            ], 
-            shell = True,
+            _build_shell_command(command),
+            shell=False,
             cwd = os.getcwd(),
             stdout = subprocess.PIPE,
             stderr = subprocess.PIPE,
             text=True,
-            start_new_session=True,
             encoding='utf-8', errors='ignore',
+            **_process_creation_kwargs(),
         )
         with _shell_process_lock:
             _shell_process.add(process)
@@ -128,13 +190,18 @@ def _run_bash_process(command: str) -> tuple[str, int | None]:
         return f"Error: {type(error).__name__}: {error}", None
     finally:
         if process is not None:
-            _stop_process_group(process)
             try:
-                process.wait(timeout = 0.2)
-            except subprocess.TimeoutExpired:
+                _stop_process_group(process)
+            except Exception:
+                # 清理异常不能覆盖命令执行结果或后台任务状态。
                 pass
-            with _shell_process_lock:
-                _shell_process.discard(process)
+            finally:
+                try:
+                    process.wait(timeout = 0.2)
+                except (subprocess.TimeoutExpired, OSError):
+                    pass
+                with _shell_process_lock:
+                    _shell_process.discard(process)
 
 
 def _format_bash_result(output: str, exit_code: int | None) -> str:
@@ -369,13 +436,8 @@ def run_powershell(context: ToolContext, command: str) -> str:
     
     # 通过子进程执行命令
     try:
-        r = subprocess.run([
-                                "powershell",
-                                "-NoProfile",
-                                "-ExecutionPolicy", "Bypass",
-                                "-Command",
-                                command,
-                            ], 
+        r = subprocess.run(
+                            _build_shell_command(command),
                             cwd=os.getcwd(),
                             capture_output = True, 
                             encoding='utf-8', errors='ignore',

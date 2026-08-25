@@ -9,8 +9,6 @@ Typical usage example:
 
 from typing import List, Dict
 
-import api
-import cli
 import config
 import hook
 import event
@@ -22,9 +20,10 @@ from event.interaction import Interaction, NonInteractiveInteraction
 
 
 WORKDIR = config.Config().get_path_config("project_path")
+SYSTEM_INFO = config.get_system_info()
 
 # 设置子智能体系统提示词
-SUB_SYSTEM = (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。"
+SUB_SYSTEM = (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 {SYSTEM_INFO['system']}。使用 {SYSTEM_INFO['shell_name']} 解决任务。行动，无需解释。"
               "完成分配给你的任务，然后提交一份简明扼要的总结。"
               "不要再进一步委托子智能体。")
 
