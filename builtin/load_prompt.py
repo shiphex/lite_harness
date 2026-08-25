@@ -30,6 +30,7 @@ except Exception:
 
 
 WORKDIR = config.Config().get_project_path()
+SYSTEM_INFO = config.get_system_info()
 """当前项目工作目录。"""
 
 MEMORY_INDEX = config.Config().get_path_config("memory_index")
@@ -162,7 +163,7 @@ def build_system() -> str:
     index = read_memory_index()
     memories_section = f"\n\nMemories available:\n{index}" if index else ""
 
-    return (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。"
+    return (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 {SYSTEM_INFO['system']}。使用 {SYSTEM_INFO['shell_name']} 解决任务。行动，无需解释。"
           f"在开始任何多步骤任务之前，请使用 todo_write 来规划您的步骤。"
           f"当前可用的 skill 有：{catalog}"
           f"对于复杂的子问题，可以使用任务工具生成子智能体。"
@@ -175,7 +176,7 @@ def build_system() -> str:
 # ═══════════════════════════════════════════════════════════
 
 PROMPT_SECTIONS = {
-    "identity": "当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。",
+    "identity": f"当前系统环境是 {SYSTEM_INFO['system']}。使用 {SYSTEM_INFO['shell_name']} 解决任务。行动，无需解释。",
     "tools": f"当前可用的 tool 有：{', '.join([tool['name'] for tool in TOOLS_LIST])}",
     "workspace": f"当前工作目录是 {WORKDIR}",
     "skill": f"当前可用的 skill 有：{list_skill()}",

@@ -6,14 +6,13 @@ Typical usage example:
     import tools
 """
 
-from .powershell import run_powershell
+from .powershell import run_powershell, run_bash
 from .file_option import run_read, run_write, run_edit, run_glob
 from .todo_write import run_todo_write
 from .subagent import run_subagent
 from .load_skill import load_skill
 from .tool_class import ToolContext
 from .task_system import run_create_task, run_update_task, run_list_tasks, run_get_task, run_claim_task, run_complete_task
-
 
 
 class ToolExecutor:
@@ -34,8 +33,8 @@ class ToolExecutor:
 
 # 初级工具列表
 STANDARD_TOOLS_LIST = [
-    {"name": "powershell", "description": "执行一个 PowerShell 命令。",
-     "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
+    {"name": "bash", "description": "执行一个命令行操作，若指定在后台运行，则返回任务 ID，否则返回命令执行结果。",
+     "input_schema": {"type": "object", "properties": {"command": {"type": "string"}, "run_in_background": {"type": "boolean"}}, "required": ["command"]}},
     {"name": "read_file", "description": "读取文件内容。",
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, 
                                                        "limit": {"type": "integer", 
@@ -117,7 +116,8 @@ TOOLS_LIST = STANDARD_TOOLS_LIST + ADVANCED_TOOLS_LIST
 
 # 初级工具分发映射
 STANDARD_TOOLS_HANDLERS = {
-    "powershell":   run_powershell,
+    # "powershell":   run_powershell,
+    "bash":         run_bash,
     "read_file":    run_read,
     "write_file":   run_write,
     "edit_file":    run_edit,
