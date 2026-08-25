@@ -224,7 +224,6 @@ class BackgroundManager:
             with self._lock:
                 self.tasks.pop(task_id, None)
             raise
-        等待插入 event 通知任务完成
         # print(f"  [background] started {task_id}: {command[:60]}")
         return task_id
 
