@@ -12,6 +12,8 @@ from .todo_write import run_todo_write
 from .subagent import run_subagent
 from .load_skill import load_skill
 from .tool_class import ToolContext
+from .task_system import run_create_task, run_update_task, run_list_tasks, run_get_task, run_claim_task, run_complete_task
+
 
 
 class ToolExecutor:
@@ -30,7 +32,6 @@ class ToolExecutor:
         return handler(context, **args) if handler else f"Unknown: {name}"
        
 
-
 # 初级工具列表
 STANDARD_TOOLS_LIST = [
     {"name": "powershell", "description": "执行一个 PowerShell 命令。",
@@ -47,7 +48,28 @@ STANDARD_TOOLS_LIST = [
     {"name": "glob", "description": "查找与 glob 模式匹配的文件。",
      "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},   
     {"name": "load_skill", "description": "按名称加载 skill 的全部内容。",
-         "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}, 
+     "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}, 
+    {"name": "create_task", "description": "创建任务并返回其runtime-generated ID。",
+     "input_schema": {"type": "object", 
+                      "properties": {"subject": {"type": "string"}, 
+                                     "description": {"type": "string"}}, 
+                      "required": ["subject"], 
+                      "additionalProperties": False}}, 
+    {"name": "update_task", "description": "使用 create_task 返回的 ID 添加依赖项。",
+     "input_schema": {"type": "object", 
+                      "properties": {"task_id": {"type": "string", "pattern": "^task_[0-9a-f]{8}$"}, 
+                                     "addBlockedBy": {"type": "array", 
+                                                      "items": {"type": "string", "pattern": "^task_[0-9a-f]{8}$"}, 
+                                                      "minItems": 1}}, 
+                      "required": ["task_id", "addBlockedBy"], "additionalProperties": False}},
+    {"name": "list_tasks", "description": "列出任务及其状态、负责人和依赖关系。",
+     "input_schema": {"type": "object", "properties": {}}},
+    {"name": "get_task", "description": "通过任务ID获取任务。",
+     "input_schema": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]}},
+    {"name": "claim_task", "description": "认领一项待处理任务，该任务的依赖项已全部完成。",
+     "input_schema": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]}},
+    {"name": "complete_task", "description": "完成 agent 提出的任务。",
+     "input_schema": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]}},
 ]
 
 
@@ -101,6 +123,12 @@ STANDARD_TOOLS_HANDLERS = {
     "edit_file":    run_edit,
     "glob":         run_glob,
     "load_skill":   load_skill,
+    "create_task":  run_create_task,
+    "update_task":  run_update_task,
+    "list_tasks":   run_list_tasks,
+    "get_task":     run_get_task,
+    "claim_task":   run_claim_task,
+    "complete_task": run_complete_task,
 }
 
 # 高级工具分发映射
