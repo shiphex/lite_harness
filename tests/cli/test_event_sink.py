@@ -41,6 +41,12 @@ class RuntimeStub:
             "put_agent_other_info",
             "[TEAM] alice: working",
         ),
+        (
+            EventType.TEAM_MEMBER_SHUTDOWN_TIMEOUT,
+            {"members": ["alice", "bob"], "timeout_seconds": 5.0},
+            "put_agent_other_info",
+            "[TEAM] shutdown timed out: alice, bob",
+        ),
     ],
 )
 def test_cli_event_sink_dispatches_supported_events(

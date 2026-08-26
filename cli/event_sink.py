@@ -68,6 +68,12 @@ class CliEventSink:
                 cli.put_agent_other_info(
                     f"[TEAM] stopped {event.data['member']}"
                 )
+
+            case EventType.TEAM_MEMBER_SHUTDOWN_TIMEOUT:
+                members = ", ".join(event.data["members"])
+                cli.put_agent_other_info(
+                    f"[TEAM] shutdown timed out: {members}"
+                )
                 
             case EventType.COMPACT_STARTED:
                 cli.put_agent_other_info(

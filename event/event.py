@@ -60,6 +60,7 @@ class EventType(StrEnum):
     TEAM_MEMBER_SPAWNED = "team.member.spawned"
     TEAM_MEMBER_STATUS_CHANGED = "team.member.status_changed"
     TEAM_MEMBER_STOPPED = "team.member.stopped"
+    TEAM_MEMBER_SHUTDOWN_TIMEOUT = "team.member.shutdown_timeout"
     TEAM_MESSAGE_SENT = "team.message.sent"
     TEAM_MESSAGE_RECEIVED = "team.message.received"
 

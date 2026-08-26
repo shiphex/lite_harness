@@ -110,6 +110,9 @@ def test_spawn_followup_persists_runtime_and_shutdown(tmp_path, monkeypatch):
     assert EventType.TEAM_MESSAGE_SENT in event_types
     assert EventType.TEAM_MESSAGE_RECEIVED in event_types
     assert EventType.TEAM_MEMBER_STOPPED in event_types
+    assert event_types.index(EventType.TEAM_MEMBER_SPAWNED) < event_types.index(
+        EventType.TEAM_MEMBER_STATUS_CHANGED
+    )
 
 
 def test_current_task_is_derived_from_team_task_store(tmp_path, monkeypatch):
@@ -315,6 +318,34 @@ def test_spawn_startup_failure_cleans_partial_member(tmp_path, monkeypatch):
         coordinator.bus.send(TeamMessage("lead", "alice", "hello"))
 
 
+def test_worker_start_failure_keeps_failed_roster_and_event_order(tmp_path, monkeypatch):
+    coordinator, lead, memory_sink = make_coordinator(tmp_path, monkeypatch)
+
+    def fail_start(self, initial_prompt):
+        raise RuntimeError("thread start failed")
+
+    monkeypatch.setattr(worker_module.TeammateWorker, "start", fail_start)
+
+    with pytest.raises(RuntimeError, match="thread start failed"):
+        coordinator.spawn(
+            parent_runtime=lead,
+            name="alice",
+            role="reviewer",
+            prompt="review",
+        )
+
+    assert coordinator.members["alice"].status == MemberStatus.FAILED
+    event_types = [item.type for item in memory_sink.events]
+    assert event_types == [
+        EventType.TEAM_MEMBER_SPAWNED,
+        EventType.TEAM_MEMBER_STATUS_CHANGED,
+    ]
+    assert memory_sink.events[-1].data == {
+        "member": "alice",
+        "status": MemberStatus.FAILED,
+    }
+
+
 def test_peer_message_result_goes_to_lead_without_reply_loop(tmp_path, monkeypatch):
     coordinator, lead, _ = make_coordinator(tmp_path, monkeypatch)
     coordinator.spawn(
@@ -371,3 +402,45 @@ def test_messages_validate_recipient_and_use_runtime_metadata(tmp_path, monkeypa
     assert sent.agent_id == alice_runtime.agent_id
     assert received.agent_id == lead.agent_id
     coordinator.shutdown_all()
+
+
+def test_shutdown_all_reports_workers_still_running_after_timeout(tmp_path, monkeypatch):
+    from threading import Event as ThreadEvent
+
+    started = ThreadEvent()
+    release = ThreadEvent()
+
+    def blocking_run(runtime, prompt):
+        started.set()
+        release.wait(2)
+        runtime.state.messages.append({
+            "role": "assistant",
+            "content": [{"type": "text", "text": "finished"}],
+        })
+        return runtime.state, {"reason": "completed"}
+
+    coordinator, lead, memory_sink = make_coordinator(
+        tmp_path,
+        monkeypatch,
+        run_turn=blocking_run,
+    )
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="alice",
+        role="reviewer",
+        prompt="block",
+    )
+    assert started.wait(1)
+
+    assert coordinator.shutdown_all(timeout_seconds=0.0) == ["alice"]
+    timeout_event = memory_sink.events[-1]
+    assert timeout_event.type == EventType.TEAM_MEMBER_SHUTDOWN_TIMEOUT
+    assert timeout_event.agent_id == lead.agent_id
+    assert timeout_event.data == {
+        "members": ["alice"],
+        "timeout_seconds": 0.0,
+    }
+
+    release.set()
+    coordinator.workers["alice"].join(1)
+    assert coordinator.shutdown_all(timeout_seconds=0.0) == []

@@ -154,6 +154,15 @@ class TeamCoordinator:
                     name,
                     role.strip(),
                 )
+                if runtime.session_id != parent_runtime.session_id:
+                    raise TeamError("teammate Runtime 必须属于当前 team session")
+                if runtime.agent_id == parent_runtime.agent_id:
+                    raise TeamError("teammate Runtime 必须拥有独立 agent_id")
+                if any(
+                    existing.agent_id == runtime.agent_id
+                    for existing in self.members.values()
+                ):
+                    raise TeamError("teammate Runtime agent_id 在当前 team 中已使用")
                 member = TeamMember(
                     name=name,
                     role=role.strip(),
@@ -167,9 +176,8 @@ class TeamCoordinator:
                 )
                 self.members[name] = member
                 self.workers[name] = worker
-                worker.start(prompt)
             except Exception:
-                # 启动阶段尚无 task 绑定，只需清除半成品 roster 与 mailbox。
+                # Runtime factory 失败时成员尚未对外可见，清除半成品 roster 与 mailbox。
                 self.members.pop(name, None)
                 self.workers.pop(name, None)
                 self.bus.unregister(name)
@@ -181,6 +189,12 @@ class TeamCoordinator:
             member=name,
             role=role.strip(),
         )
+        try:
+            worker.start(prompt)
+        except Exception:
+            # spawned 已对外可见，因此线程启动失败应保留 terminal roster 记录。
+            self._set_status(name, MemberStatus.FAILED)
+            raise
         return replace(member)
 
     def send(
@@ -318,11 +332,14 @@ class TeamCoordinator:
         worker.stop()
         return True
 
-    def shutdown_all(self, timeout_seconds: float = 5.0) -> None:
+    def shutdown_all(self, timeout_seconds: float = 5.0) -> list[str]:
         """停止全部 teammate，并在共享截止时间内等待线程退出。
 
         Args:
             timeout_seconds: 所有 Worker 共用的最大等待秒数。
+
+        Returns:
+            list[str]: 截止时间后仍在运行的 teammate 名称；正常停止时为空列表。
         """
 
         with self._lock:
@@ -344,6 +361,19 @@ class TeamCoordinator:
         deadline = monotonic() + max(0.0, timeout_seconds)
         for _, worker in workers:
             worker.join(max(0.0, deadline - monotonic()))
+
+        alive = [name for name, worker in workers if worker.is_alive()]
+        if alive:
+            with self._lock:
+                lead_runtime = self._lead_runtime
+            if lead_runtime is not None:
+                self._emit(
+                    lead_runtime,
+                    event.EventType.TEAM_MEMBER_SHUTDOWN_TIMEOUT,
+                    members=alive,
+                    timeout_seconds=timeout_seconds,
+                )
+        return alive
 
     def _runtime_name(self, runtime: "AgentRuntime") -> str:
         """校验 Runtime 的 session/agent identity 并返回其 team name。"""
