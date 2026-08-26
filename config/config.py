@@ -64,6 +64,12 @@ def parse_args(argv = None):
     parser.add_argument("--model_url", type = str, default = "http://localhost:8000", help = "模型 URL")
     parser.add_argument("--api_key", type = str, default = "no-key", help = "模型 API 密钥")
     parser.add_argument("--model_name", type = str, default = "claude-fable-5", help = "模型名称")
+    parser.add_argument(
+        "--team_max_members",
+        type=int,
+        default=3,
+        help="单个 Agent Team 允许的最大活跃 teammate 数量",
+    )
     cmd_args = parser.parse_args(argv)
     # 将命令行解析出的命名空间，快速转化为标准的 Python 字典
     # 此时 args_dict = {'chars_per_token': 1.0, 'ctx_tokens': 20480, 'max_tokens': 2048, ......}
@@ -182,6 +188,11 @@ class Config():
             "fallback_model_name": kwargs.get("fallback_model_name", "claude-fable-5"),
         }
 
+        # Agent Teams 运行配置
+        self.TEAM_MAX_MEMBERS = kwargs.get("team_max_members", 3)
+        if not isinstance(self.TEAM_MAX_MEMBERS, int) or self.TEAM_MAX_MEMBERS <= 0:
+            raise ValueError("team_max_members 必须是正整数")
+
     # —————— 获取路径相关配置 ——————
     def get_path_config(self, path_name: str):
         """ 获取路径相关配置
@@ -236,3 +247,14 @@ class Config():
             dict: 模型相关字典
         """
         return self.model_config
+
+    def get_team_config(self) -> dict[str, int]:
+        """获取 Agent Teams 运行配置。
+
+        Returns:
+            dict[str, int]: 包含 ``MAX_MEMBERS`` 的 team 配置副本。
+        """
+
+        return {
+            "MAX_MEMBERS": self.TEAM_MAX_MEMBERS,
+        }

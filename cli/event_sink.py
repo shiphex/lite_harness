@@ -46,6 +46,28 @@ class CliEventSink:
                 cli.put_agent_output(
                     "\n".join(lines)
                 )
+
+            case EventType.TEAM_MEMBER_SPAWNED:
+                cli.put_agent_other_info(
+                    f"[TEAM] spawned {event.data['member']} "
+                    f"({event.data['role']})"
+                )
+
+            case EventType.TEAM_MEMBER_STATUS_CHANGED:
+                cli.put_agent_other_info(
+                    f"[TEAM] {event.data['member']}: {event.data['status']}"
+                )
+
+            case EventType.TEAM_MESSAGE_RECEIVED:
+                if str(event.data.get("kind")) == "result":
+                    cli.put_agent_other_info(
+                        f"[TEAM] result from {event.data['sender']}"
+                    )
+
+            case EventType.TEAM_MEMBER_STOPPED:
+                cli.put_agent_other_info(
+                    f"[TEAM] stopped {event.data['member']}"
+                )
                 
             case EventType.COMPACT_STARTED:
                 cli.put_agent_other_info(

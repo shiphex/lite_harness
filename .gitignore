@@ -16,6 +16,7 @@ workspace/
 .agents/.memory/
 .agents/runs/
 .agents/.tasks/
+.agents/teams/
 
 # Documentation
 doc/dev_doc/

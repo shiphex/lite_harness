@@ -8,20 +8,52 @@ Typical usage example:
     agent()
 """
 
+from dataclasses import dataclass, field
 from typing import List, Dict
+from uuid import uuid4
 
-import hook
 import builtin
 import tools
 import config
 import event
-from .loop import query_loop
-from .runtime import RunPolicy, state, RuntimeFactory
+from .runner import run_turn
+from .runtime import AgentRuntime, RunPolicy, state, RuntimeFactory
 from builtin.memory import MemoryPolicy, MemoryMode
 from cli.event_sink import CliEventSink
 from cli.cli_interaction import CliInteraction
 from event.sink import EventSink
+from event.sink import SynchronizedEventSink
 from event.interaction import Interaction
+from team.coordinator import TeamCoordinator
+from team.factory import create_teammate_runtime
+from tools.task_system import bind_task_handlers
+from tools.team import (
+    TEAM_COMMON_TOOLS,
+    TEAM_LEAD_TOOLS,
+    bind_team_handlers,
+)
+
+
+@dataclass
+class MasterSession:
+    """持有 lead Runtime 与 session-scoped TeamCoordinator。
+
+    Args:
+        runtime: 当前 CLI 会话的 lead Runtime。
+        team: 当前会话独享的 TeamCoordinator。
+    """
+
+    runtime: AgentRuntime
+    team: TeamCoordinator
+    _closed: bool = field(default=False, init=False, repr=False)
+
+    def close(self) -> None:
+        """幂等关闭 TeamCoordinator 管理的全部 Worker。"""
+
+        if self._closed:
+            return
+        self._closed = True
+        self.team.shutdown_all(timeout_seconds=5.0)
 
 
 
@@ -29,11 +61,18 @@ def create_master_runtime(history: List,
                           context: Dict,
                           events: EventSink,
                           interaction: Interaction,
+                          team: TeamCoordinator | None = None,
+                          session_id: str | None = None,
                         ):
     """ 创建主 Agent 的运行时环境。
 
     Args:
-        None
+        history: lead 初始消息历史。
+        context: lead 初始运行上下文。
+        events: Runtime 使用的 EventSink。
+        interaction: Runtime 使用的用户交互实现。
+        team: 可选的 session-scoped TeamCoordinator。
+        session_id: 可选的显式 session ID。
 
     Returns:
         AgentRuntime: 主 Agent 的运行时环境。
@@ -46,12 +85,20 @@ def create_master_runtime(history: List,
         or configured_model["model_name"]
     )
     content_config = config.Config().get_content_length()
+    tool_definitions = list(tools.TOOLS_LIST)
+    tool_handlers = dict(tools.TOOLS_HANDLERS)
+    if team is not None:
+        # master session 中所有 task 工具都绑定到 team-scoped TaskStore。
+        tool_definitions += TEAM_COMMON_TOOLS + TEAM_LEAD_TOOLS
+        tool_handlers |= bind_task_handlers(team.tasks)
+        tool_handlers |= bind_team_handlers(team, allow_lead_tools=True)
+
     agent_RunPolicy = RunPolicy(max_turns = 300,
                                 prompt = "你是一个编码助手",
                                 model = configured_model,
                                 fallback_model = fallback_model,
-                                tools_list = tools.TOOLS_LIST, 
-                                tool_handler = tools.TOOLS_HANDLERS,
+                                tools_list = tool_definitions,
+                                tool_handler = tool_handlers,
                                 can_ask_user = True)
             
     # 初始化 queryLoop 循环的运行状态
@@ -73,17 +120,57 @@ def create_master_runtime(history: List,
     )
 
     runtime = RuntimeFactory.create(
-        agent_name = "Master Agent",
+        # Team Runtime 直接使用协议名称 lead，避免维护额外身份映射。
+        agent_name = "lead" if team is not None else "Master Agent",
         policy = agent_RunPolicy,
         state = agent_state,
         memory_policy = memoryPolicy,
         workspace = config.Config().get_path_config("project_path"),
-        session_id = None,
+        session_id = session_id,
         events = events,
         interaction = interaction,
     )
     
     return runtime
+
+
+def create_master_session(
+    history: List,
+    context: Dict,
+    events: EventSink,
+    interaction: Interaction,
+) -> MasterSession:
+    """创建带 Agent Teams 协作平面的 master session。
+
+    Args:
+        history: lead 初始消息历史。
+        context: lead 初始运行上下文。
+        events: 上层提供的 EventSink。
+        interaction: 上层提供的用户输入和审批实现。
+
+    Returns:
+        MasterSession: 包含 lead Runtime 和 TeamCoordinator 的生命周期对象。
+    """
+
+    current_config = config.Config()
+    workspace = current_config.get_path_config("project_path")
+    session_id = uuid4().hex[:8]
+    synchronized_events = SynchronizedEventSink(events)
+    coordinator = TeamCoordinator(
+        team_id=f"team_{session_id}",
+        workspace=workspace,
+        runtime_factory=create_teammate_runtime,
+        max_members=current_config.get_team_config()["MAX_MEMBERS"],
+    )
+    runtime = create_master_runtime(
+        history,
+        context,
+        events=synchronized_events,
+        interaction=interaction,
+        team=coordinator,
+        session_id=session_id,
+    )
+    return MasterSession(runtime=runtime, team=coordinator)
 
 
 def master_agent():
@@ -107,68 +194,64 @@ def master_agent():
     # 初始化上下文
     context = builtin.update_context({})
 
-    runtime = create_master_runtime(history, 
-                                    context,
-                                    events=CliEventSink(),
-                                    interaction=CliInteraction())
-
-    # 告知用户系统信息
-    runtime.events.emit(
-        event.make_event(
-                runtime,
-                event.EventType.SYSTEM_MESSAGE,
-                trigger="输入问题，回车发送。输入 q 退出。",
-            )
+    session = create_master_session(
+        history,
+        context,
+        events=CliEventSink(),
+        interaction=CliInteraction(),
     )
+    runtime = session.runtime
 
-    while True:
-        # 获取用户输入
-        try:
-            user_input = runtime.interaction.get_user_input()
-            
-        except (EOFError, KeyboardInterrupt):
-            break
-        normalized_input = user_input.strip().lower()
-        if not normalized_input or normalized_input in ("q", "exit"):
-            break
-        
-        # 执行 UserPromptSubmit hook
-        runtime.hooks.run(
-            hook.HookEvent.USER_PROMPT_SUBMIT,
-            hook.make_hook_context(runtime),
-            user_input,
+    try:
+        # 告知用户系统信息。该事件也位于 finally 保护范围内。
+        runtime.events.emit(
+            event.make_event(
+                    runtime,
+                    event.EventType.SYSTEM_MESSAGE,
+                    trigger="输入问题，回车发送。输入 q 退出。",
+                )
         )
 
-        # 记录用户输入
-        history.append({"role": "user", "content": user_input})
+        while True:
+            # 获取用户输入
+            try:
+                user_input = runtime.interaction.get_user_input()
 
-        # 执行 agent_loop 工作循环
-        runtime.begin_run()
-        agent_state, status = query_loop(runtime)
+            except (EOFError, KeyboardInterrupt):
+                break
+            normalized_input = user_input.strip().lower()
+            if not normalized_input or normalized_input in ("q", "exit"):
+                break
 
-        # 更新上下文
-        history = agent_state.messages
-        context = builtin.update_context(context, memory_index=runtime.memory.index_path)
+            # 通过统一入口执行完整 run，避免顶层 Agent 重复维护 Hook 和状态初始化。
+            agent_state, status = run_turn(runtime, user_input)
 
-        # 执行系统输出
-        response = next(
-            (
-                message.get("content")
-                for message in reversed(history)
-                if message.get("role") == "assistant"
-            ),
-            "",
-        )
-        if isinstance(response, list):
-            for block in response:
-                block_type = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
-                if block_type == "text":
-                    # 执行系统输出
-                    text = block.get("text", "") if isinstance(block, dict) else block.text
-                    runtime.events.emit(
-                        event.make_event(
-                            runtime,
-                            event.EventType.ASSISTANT_MESSAGE,
-                            text = text,
+            # 更新上下文
+            history = agent_state.messages
+            context = builtin.update_context(context, memory_index=runtime.memory.index_path)
+
+            # 执行系统输出
+            response = next(
+                (
+                    message.get("content")
+                    for message in reversed(history)
+                    if message.get("role") == "assistant"
+                ),
+                "",
+            )
+            if isinstance(response, list):
+                for block in response:
+                    block_type = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+                    if block_type == "text":
+                        # 执行系统输出
+                        text = block.get("text", "") if isinstance(block, dict) else block.text
+                        runtime.events.emit(
+                            event.make_event(
+                                runtime,
+                                event.EventType.ASSISTANT_MESSAGE,
+                                text = text,
+                            )
                         )
-                    )
+    finally:
+        # 无论 CLI 正常退出、输入中断还是 run 抛错，都回收后台 teammate。
+        session.close()

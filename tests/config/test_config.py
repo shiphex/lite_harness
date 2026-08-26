@@ -47,6 +47,7 @@ def test_parse_args_defaults():
         "model_url": "http://localhost:8000",
         "api_key": "no-key",
         "model_name": "claude-fable-5",
+        "team_max_members": 3,
     }
 
 
@@ -68,6 +69,18 @@ def test_config_content_length_includes_mini_output_tokens():
     result = Config(**parse_args([])).get_content_length()
 
     assert result["MINI_OUTPUT_TOKENS"] == 204
+
+
+def test_config_exposes_team_member_limit():
+    assert Config(**parse_args([])).get_team_config() == {
+        "MAX_MEMBERS": 3,
+    }
+
+
+def test_parse_args_accepts_team_member_limit():
+    config = Config(**parse_args(["--team_max_members", "5"]))
+
+    assert config.get_team_config()["MAX_MEMBERS"] == 5
 
 
 def test_config_exposes_runtime_paths():

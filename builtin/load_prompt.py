@@ -180,6 +180,21 @@ PROMPT_SECTIONS = {
     "tools": f"当前可用的 tool 有：{', '.join([tool['name'] for tool in TOOLS_LIST])}",
     "workspace": f"当前工作目录是 {WORKDIR}",
     "skill": f"当前可用的 skill 有：{list_skill()}",
+    "tasks": (
+        "对于任何多步骤任务，使用 task 系列工具跟踪依赖关系和进度。首先创建所有任务节点。"
+        "在 create_task 返回运行时生成的 ID 后，使用 update_task 和这些确切的 ID 添加依赖项。"
+    ),
+    "teams": (
+        "如需开展可并行的只读研究或评审工作，可先创建职责清晰的共享 task。"
+        "调用 spawn_teammate 创建持久 teammate；每次创建都需要用户审批。"
+        "通过 read_messages 读取结果，必要时用 send_message 发送 follow-up，"
+        "并用 list_team 查看 roster 和共享 task 状态；全部完成后关闭 teammate。"
+    ),
+    "teammate": (
+        "你是 Agent Team 中的 teammate。你只能执行项目文件只读的研究、分析和评审任务。"
+        "使用共享 task 工具显式认领和完成工作；需要沟通时使用 send_message。"
+        "不要创建 task、subagent 或 teammate，也不要修改 task 依赖。"
+    ),
     "memory": "相关记忆内容将在下方插入（如有）。"
 }
 
@@ -201,19 +216,30 @@ def assemble_system_prompt(runtime, context: dict) -> str:
         sections.append(runtime.policy.prompt)
 
     sections.append(PROMPT_SECTIONS["identity"])
-    sections.append(f"当前可用的 tool 有：{', '.join([tool['name'] for tool in runtime.policy.tools_list])}")
-    if "todo_write" in runtime.policy.tools_list:
+    tool_names = {
+        tool["name"]
+        for tool in runtime.policy.tools_list
+        if isinstance(tool, dict) and isinstance(tool.get("name"), str)
+    }
+    sections.append(f"当前可用的 tool 有：{', '.join(sorted(tool_names))}")
+    if "todo_write" in tool_names:
         sections.append("在开始任何多步骤任务之前，请使用 todo_write 来规划您的步骤。")
-    if "create_task" in runtime.policy.tools_list \
-       and "update_task" in runtime.policy.tools_list \
-       and "list_tasks" in runtime.policy.tools_list \
-       and "get_task" in runtime.policy.tools_list \
-       and "claim_task" in runtime.policy.tools_list \
-       and "complete_task" in runtime.policy.tools_list:
-        sections.append("对于任何多步骤任务，使用 task 系列工具跟踪依赖关系和进度。首先，创建所有任务节点。")
-        sections.append("在 create_task 返回运行时生成的 ID 之后，使用 update_task 并使用这些确切的 ID 来添加依赖项。")
+    task_tool_names = {
+        "create_task",
+        "update_task",
+        "list_tasks",
+        "get_task",
+        "claim_task",
+        "complete_task",
+    }
+    if task_tool_names <= tool_names:
+        sections.append(PROMPT_SECTIONS["tasks"])
     sections.append(f"当前工作目录是 {runtime.paths.workspace}")
     sections.append(PROMPT_SECTIONS["skill"])
+    if "spawn_teammate" in tool_names:
+        sections.append(PROMPT_SECTIONS["teams"])
+    elif "send_message" in tool_names and "complete_task" in tool_names:
+        sections.append(PROMPT_SECTIONS["teammate"])
     sections.append(PROMPT_SECTIONS["memory"])
 
     memories = context.get("memories", "")

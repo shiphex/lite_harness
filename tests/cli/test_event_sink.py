@@ -23,6 +23,24 @@ class RuntimeStub:
         (EventType.TOOL_BLOCKED, {"reason": "blocked"}, "put_agent_other_info", "[BLOCKED]: blocked"),
         (EventType.COMPACT_STARTED, {}, "put_agent_other_info", "[auto compact]"),
         (EventType.ERROR, {"message": "failed"}, "inform_system_warning", "failed"),
+        (
+            EventType.TEAM_MEMBER_SPAWNED,
+            {"member": "alice", "role": "reviewer"},
+            "put_agent_other_info",
+            "[TEAM] spawned alice (reviewer)",
+        ),
+        (
+            EventType.TEAM_MEMBER_STOPPED,
+            {"member": "alice"},
+            "put_agent_other_info",
+            "[TEAM] stopped alice",
+        ),
+        (
+            EventType.TEAM_MEMBER_STATUS_CHANGED,
+            {"member": "alice", "status": "working"},
+            "put_agent_other_info",
+            "[TEAM] alice: working",
+        ),
     ],
 )
 def test_cli_event_sink_dispatches_supported_events(

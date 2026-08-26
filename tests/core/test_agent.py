@@ -6,7 +6,6 @@ import pytest
 from core import agent
 from core.runtime import state
 from event import EventType, make_event
-from hook.hook_handler import HookEvent
 
 
 def _config(tmp_path):
@@ -26,6 +25,9 @@ def _config(tmp_path):
         def get_path_config(self, name):
             assert name == "project_path"
             return tmp_path
+
+        def get_team_config(self):
+            return {"MAX_MEMBERS": 3}
 
     return FakeConfig
 
@@ -77,22 +79,19 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
             get_user_input=lambda message=">> ": next(inputs),
         ),
     )
-    hook_calls = []
-    begin_run_calls = []
     created_with = {}
-    runtime.hooks = SimpleNamespace(
-        run=lambda event, context, *args: hook_calls.append((event, context, args))
-    )
-    runtime.begin_run = lambda: (
-        begin_run_calls.append(True),
-        setattr(runtime.state, "turn_count", 0),
-    )
+    close_calls = []
     captured = {}
     context_updates = []
 
-    def fake_query_loop(current_runtime):
+    def fake_run_turn(current_runtime, user_input):
         captured["runtime"] = current_runtime
-        assert current_runtime.state.turn_count == 0
+        captured["user_input"] = user_input
+        current_runtime.state.turn_count = 0
+        current_runtime.state.messages.append({
+            "role": "user",
+            "content": user_input,
+        })
         current_runtime.events.emit(
             make_event(current_runtime, EventType.RUN_STARTED)
         )
@@ -109,15 +108,17 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
         )
         return current_runtime.state, {"reason": "completed"}
 
-    def fake_create_runtime(history, context, **kwargs):
+    def fake_create_session(history, context, **kwargs):
         created_with.update(kwargs)
         runtime.state.messages = history
         runtime.state.context = context
-        return runtime
+        return SimpleNamespace(
+            runtime=runtime,
+            close=lambda: close_calls.append(True),
+        )
 
-    monkeypatch.setattr(agent, "create_master_runtime", fake_create_runtime)
-    monkeypatch.setattr(agent, "query_loop", fake_query_loop)
-    monkeypatch.setattr(agent.hook, "make_hook_context", lambda current_runtime: "hook-context")
+    monkeypatch.setattr(agent, "create_master_session", fake_create_session)
+    monkeypatch.setattr(agent, "run_turn", fake_run_turn)
     monkeypatch.setattr(
         agent.builtin,
         "update_context",
@@ -127,12 +128,10 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
     agent.master_agent()
 
     assert captured["runtime"] is runtime
-    assert len(begin_run_calls) == 1
+    assert captured["user_input"] == "hello"
     assert set(created_with) == {"events", "interaction"}
+    assert close_calls == [True]
     assert runtime.state.messages[0] == {"role": "user", "content": "hello"}
-    assert hook_calls == [
-        (HookEvent.USER_PROMPT_SUBMIT, "hook-context", ("hello",)),
-    ]
     assert len(context_updates) == 2
     assert context_updates[0] == ({}, {})
     assert context_updates[-1][1]["memory_index"] == runtime.memory.index_path
@@ -156,13 +155,43 @@ def test_master_agent_accepts_exit_inputs(monkeypatch, exit_input):
         events=SimpleNamespace(emit=events.append),
         interaction=SimpleNamespace(get_user_input=lambda message=">> ": exit_input),
     )
+    close_calls = []
     monkeypatch.setattr(
         agent,
-        "create_master_runtime",
-        lambda history, context, **kwargs: runtime,
+        "create_master_session",
+        lambda history, context, **kwargs: SimpleNamespace(
+            runtime=runtime,
+            close=lambda: close_calls.append(True),
+        ),
     )
     monkeypatch.setattr(agent.builtin, "update_context", lambda *args, **kwargs: {})
 
     agent.master_agent()
 
     assert [item.type for item in events] == [EventType.SYSTEM_MESSAGE]
+    assert close_calls == [True]
+
+
+def test_create_master_session_adds_team_tools(monkeypatch, tmp_path):
+    monkeypatch.setattr(agent.config, "Config", _config(tmp_path))
+
+    session = agent.create_master_session(
+        [],
+        {},
+        events=SimpleNamespace(emit=lambda event: None),
+        interaction=SimpleNamespace(),
+    )
+    tool_names = {tool["name"] for tool in session.runtime.policy.tools_list}
+
+    assert session.runtime.session_id in session.team.team_id
+    assert session.team.max_members == 3
+    assert {
+        "spawn_teammate",
+        "send_message",
+        "read_messages",
+        "list_team",
+        "shutdown_teammate",
+    } <= tool_names
+    assert "wait_teammates" not in tool_names
+    assert session.runtime.agent_name == "lead"
+    session.close()
