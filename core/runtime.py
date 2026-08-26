@@ -78,6 +78,7 @@ class RuntimePaths:
     """ 用于记录 agent 运行时的路径
     """
     workspace: Path
+    state_root: Path
 
     session_dir: Path
     agent_dir: Path
@@ -91,13 +92,22 @@ class RuntimePaths:
         workspace: Path,
         session_id: str,
         agent_id: str,
+        state_root: Path | None = None,
     ) -> "RuntimePaths":
 
-        session_dir = workspace / ".agents" / "runs" / session_id
+        workspace = Path(workspace).resolve()
+        state_root = (
+            Path(state_root).resolve()
+            if state_root is not None
+            else workspace
+        )
+
+        session_dir = state_root / ".agents" / "runs" / session_id
         agent_dir = session_dir / agent_id
 
         paths = cls(
             workspace=workspace,
+            state_root=state_root,
             session_dir=session_dir,
             agent_dir=agent_dir,
             tool_result_dir=agent_dir / "tool_results",
@@ -150,12 +160,19 @@ class RuntimeFactory:
         state,
         memory_policy: MemoryPolicy,
         workspace: Path,
+        state_root: Path | None = None,
         session_id: str | None = None,
         hooks: HookManager | None = None,
         events: EventSink | None = None,
         interaction: Interaction | None = None,
     ) -> AgentRuntime:
 
+        workspace = Path(workspace).resolve()
+        state_root = (
+            Path(state_root).resolve()
+            if state_root is not None
+            else workspace
+        )
         session_id = session_id or uuid4().hex[:8]
         agent_id = f"{agent_name}-{uuid4().hex[:8]}"
 
@@ -163,10 +180,11 @@ class RuntimeFactory:
             workspace=workspace,
             session_id=session_id,
             agent_id=agent_id,
+            state_root=state_root,
         )
 
         memory_root = (
-            workspace / ".agents" / ".memory" / memory_policy.namespace
+            state_root / ".agents" / ".memory" / memory_policy.namespace
         )
 
         prompt = PromptBuilder()

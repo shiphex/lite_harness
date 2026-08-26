@@ -50,6 +50,29 @@ def test_runtime_factory_wires_isolated_paths_and_components(tmp_path):
     assert isinstance(runtime.interaction, NonInteractiveInteraction)
 
 
+def test_runtime_factory_separates_workspace_and_state_root(tmp_path):
+    workspace = tmp_path / "worktree"
+    state_root = tmp_path / "main"
+
+    runtime = RuntimeFactory.create(
+        agent_name="writer",
+        policy=_policy(),
+        state=state(current_model={"api": "fake", "model_name": "model"}),
+        memory_policy=MemoryPolicy(
+            mode=MemoryMode.READ_ONLY,
+            namespace="master",
+        ),
+        workspace=workspace,
+        state_root=state_root,
+        session_id="session",
+    )
+
+    assert runtime.paths.workspace == workspace.resolve()
+    assert runtime.paths.state_root == state_root.resolve()
+    assert runtime.paths.session_dir == state_root / ".agents" / "runs" / "session"
+    assert runtime.memory.root == state_root / ".agents" / ".memory" / "master"
+
+
 def test_runtime_factory_preserves_injected_runtime_components(tmp_path):
     hooks = HookManager()
     events = MemoryEventSink()
