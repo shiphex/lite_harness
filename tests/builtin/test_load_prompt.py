@@ -57,6 +57,21 @@ def test_build_system_uses_workspace_and_memory_index(monkeypatch, tmp_path):
     assert "Project facts" in system_prompt
 
 
+def test_build_system_uses_configured_platform_shell(monkeypatch):
+    monkeypatch.setattr(
+        load_prompt,
+        "SYSTEM_INFO",
+        {"system": "Linux", "shell_name": "Bash", "executable": "bash"},
+    )
+    monkeypatch.setattr(load_prompt, "list_skill", lambda: "")
+    monkeypatch.setattr(load_prompt, "read_memory_index", lambda: "")
+
+    system_prompt = load_prompt.build_system()
+
+    assert "当前系统环境是 Linux" in system_prompt
+    assert "使用 Bash" in system_prompt
+
+
 def test_assemble_system_prompt_includes_policy_prompt_and_runtime_data(
     monkeypatch,
     tmp_path,

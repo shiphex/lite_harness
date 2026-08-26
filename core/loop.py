@@ -334,10 +334,20 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
             )
         )
 
-        # 执行工具调用
-        output = runtime.tools.execute(context = ToolContext(runtime), 
-                                       name = block.name, 
-                                       args = block.input)
+        if tools.should_run_background(block.name, block.input):
+            try:
+                task_id = tools.start_background_task(block)
+                output = (
+                    f"[后台任务 {task_id} 已启动] "
+                    "结果将在稍后收集。"
+                )
+            except Exception as error:
+                output = f"错误: {error}"
+        else:
+            # 执行工具调用
+            output = runtime.tools.execute(context = ToolContext(runtime), 
+                                           name = block.name, 
+                                           args = block.input)
 
         # 触发 PostToolUse hook
         runtime.hooks.run(hook.HookEvent.POST_TOOL_USE,
@@ -559,6 +569,8 @@ def query_loop(runtime: AgentRuntime):
             continue
         else:
             messages.append({"role": "user", "content": results})
+
+        tools.inject_background_results(messages)
             
         # 更新上下文
 

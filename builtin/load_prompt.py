@@ -30,6 +30,7 @@ except Exception:
 
 
 WORKDIR = config.Config().get_project_path()
+SYSTEM_INFO = config.get_system_info()
 """当前项目工作目录。"""
 
 MEMORY_INDEX = config.Config().get_path_config("memory_index")
@@ -162,7 +163,7 @@ def build_system() -> str:
     index = read_memory_index()
     memories_section = f"\n\nMemories available:\n{index}" if index else ""
 
-    return (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。"
+    return (f"你是一个编码助手，位于 {WORKDIR}，当前系统环境是 {SYSTEM_INFO['system']}。使用 {SYSTEM_INFO['shell_name']} 解决任务。行动，无需解释。"
           f"在开始任何多步骤任务之前，请使用 todo_write 来规划您的步骤。"
           f"当前可用的 skill 有：{catalog}"
           f"对于复杂的子问题，可以使用任务工具生成子智能体。"
@@ -175,7 +176,7 @@ def build_system() -> str:
 # ═══════════════════════════════════════════════════════════
 
 PROMPT_SECTIONS = {
-    "identity": "当前系统环境是 Windows。使用 PowerShell 解决任务。行动，无需解释。",
+    "identity": f"当前系统环境是 {SYSTEM_INFO['system']}。使用 {SYSTEM_INFO['shell_name']} 解决任务。行动，无需解释。",
     "tools": f"当前可用的 tool 有：{', '.join([tool['name'] for tool in TOOLS_LIST])}",
     "workspace": f"当前工作目录是 {WORKDIR}",
     "skill": f"当前可用的 skill 有：{list_skill()}",
@@ -201,6 +202,16 @@ def assemble_system_prompt(runtime, context: dict) -> str:
 
     sections.append(PROMPT_SECTIONS["identity"])
     sections.append(f"当前可用的 tool 有：{', '.join([tool['name'] for tool in runtime.policy.tools_list])}")
+    if "todo_write" in runtime.policy.tools_list:
+        sections.append("在开始任何多步骤任务之前，请使用 todo_write 来规划您的步骤。")
+    if "create_task" in runtime.policy.tools_list \
+       and "update_task" in runtime.policy.tools_list \
+       and "list_tasks" in runtime.policy.tools_list \
+       and "get_task" in runtime.policy.tools_list \
+       and "claim_task" in runtime.policy.tools_list \
+       and "complete_task" in runtime.policy.tools_list:
+        sections.append("对于任何多步骤任务，使用 task 系列工具跟踪依赖关系和进度。首先，创建所有任务节点。")
+        sections.append("在 create_task 返回运行时生成的 ID 之后，使用 update_task 并使用这些确切的 ID 来添加依赖项。")
     sections.append(f"当前工作目录是 {runtime.paths.workspace}")
     sections.append(PROMPT_SECTIONS["skill"])
     sections.append(PROMPT_SECTIONS["memory"])

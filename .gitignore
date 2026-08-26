@@ -15,6 +15,7 @@ workspace/
 .agents/.task_output/
 .agents/.memory/
 .agents/runs/
+.agents/.tasks/
 
 # Documentation
 doc/dev_doc/
