@@ -58,7 +58,11 @@ def test_background_manager_keeps_runtime_workspace(monkeypatch, tmp_path):
         return "ok", 0
 
     monkeypatch.setattr(powershell, "_run_bash_process", fake_run)
-    task_id = manager.start(block, workspace=workspace)
+    task_id = manager.start(
+        block,
+        owner=("session-1", "agent-1"),
+        workspace=workspace,
+    )
     # Calling _run directly keeps the test deterministic; the spawned daemon
     # may already have completed, so only assert the workspace contract here.
     manager._run(task_id, "pwd", workspace)

@@ -64,3 +64,34 @@ def test_worktree_manager_removes_clean_locked_worktree(tmp_path):
     manager.remove(handle)
 
     assert not handle.path.exists()
+
+
+def test_worktree_manager_rejects_ignored_files(tmp_path):
+    repo = make_repo(tmp_path)
+    (repo / ".gitignore").write_text("build/\n", encoding="utf-8")
+    git(repo, "add", ".gitignore")
+    git(repo, "commit", "-m", "add ignore rule")
+    manager = WorktreeManager(repo_root=repo, team_id="team_test")
+
+    handle = manager.create(member="alice")
+    ignored = handle.path / "build" / "output.bin"
+    ignored.parent.mkdir()
+    ignored.write_bytes(b"generated")
+
+    assert manager.has_local_data(handle) is True
+    with pytest.raises(WorktreeError):
+        manager.remove(handle)
+
+    manager.remove(handle, discard=True)
+    assert not handle.path.exists()
+
+
+def test_worktree_manager_rolls_back_branch_after_failed_creation(tmp_path):
+    repo = make_repo(tmp_path)
+    manager = WorktreeManager(repo_root=repo, team_id="team_test")
+
+    handle = manager.create(member="alice")
+    manager.rollback_create(handle)
+
+    assert not handle.path.exists()
+    assert git(repo, "branch", "--list", handle.branch) == ""

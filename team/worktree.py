@@ -131,6 +131,19 @@ class WorktreeManager:
         path = self._validate_handle(handle)
         return self._git("status", "--short", cwd=path)
 
+    def has_local_data(self, handle: WorktreeHandle) -> bool:
+        """返回 worktree 是否包含任何 tracked、untracked 或 ignored 内容。"""
+
+        path = self._validate_handle(handle)
+        output = self._git(
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--ignored",
+            cwd=path,
+        )
+        return bool(output)
+
     def _validate_handle(self, handle: WorktreeHandle) -> Path:
         if not isinstance(handle, WorktreeHandle):
             raise WorktreeError("无效的 worktree handle")
@@ -149,7 +162,7 @@ class WorktreeManager:
         path = self._validate_handle(handle)
         if not path.exists():
             return
-        if not discard and self.status(handle):
+        if not discard and self.has_local_data(handle):
             raise WorktreeError(
                 f"worktree {handle.member!r} 仍有未提交修改，不能删除"
             )
@@ -164,3 +177,9 @@ class WorktreeManager:
             args.extend(("--force", "--force"))
         args.append(str(path))
         self._git(*args)
+
+    def rollback_create(self, handle: WorktreeHandle) -> None:
+        """回滚一次尚未对外暴露的 worktree 创建，并删除其临时 branch。"""
+
+        self.remove(handle, discard=True)
+        self._git("branch", "-D", handle.branch)

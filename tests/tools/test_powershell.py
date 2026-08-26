@@ -144,10 +144,12 @@ def test_stop_process_group_falls_back_to_process_termination(monkeypatch):
 
 def test_background_manager_collects_completed_task(monkeypatch):
     manager = powershell.BackgroundManager()
+    owner = ("session-1", "agent-1")
     manager.tasks["bg_0001"] = {
         "tool_use_id": "tool-1",
         "command": "printf done",
         "status": "running",
+        "owner": owner,
     }
     monkeypatch.setattr(
         powershell,
@@ -157,7 +159,7 @@ def test_background_manager_collects_completed_task(monkeypatch):
 
     manager._run("bg_0001", "printf done")
 
-    notifications = manager.collect()
+    notifications = manager.collect(owner)
 
     assert len(notifications) == 1
     assert "<task_id>bg_0001</task_id>" in notifications[0]
@@ -168,10 +170,12 @@ def test_background_manager_collects_completed_task(monkeypatch):
 
 def test_background_manager_marks_nonzero_exit_as_failed(monkeypatch):
     manager = powershell.BackgroundManager()
+    owner = ("session-1", "agent-1")
     manager.tasks["bg_0001"] = {
         "tool_use_id": "tool-1",
         "command": "false",
         "status": "running",
+        "owner": owner,
     }
     monkeypatch.setattr(
         powershell,
@@ -181,7 +185,63 @@ def test_background_manager_marks_nonzero_exit_as_failed(monkeypatch):
 
     manager._run("bg_0001", "false")
 
-    assert "<status>failed</status>" in manager.collect()[0]
+    assert "<status>failed</status>" in manager.collect(owner)[0]
+
+
+def test_background_manager_keeps_results_for_other_runtime(monkeypatch):
+    manager = powershell.BackgroundManager()
+    first_owner = ("session-1", "agent-1")
+    second_owner = ("session-1", "agent-2")
+    manager.tasks.update({
+        "bg_0001": {
+            "tool_use_id": "tool-1",
+            "command": "first",
+            "status": "running",
+            "owner": first_owner,
+        },
+        "bg_0002": {
+            "tool_use_id": "tool-2",
+            "command": "second",
+            "status": "running",
+            "owner": second_owner,
+        },
+    })
+    monkeypatch.setattr(
+        powershell,
+        "_run_bash_process",
+        lambda command: (command, 0),
+    )
+
+    manager._run("bg_0001", "first")
+    manager._run("bg_0002", "second")
+
+    first_notifications = manager.collect(first_owner)
+
+    assert len(first_notifications) == 1
+    assert "<task_id>bg_0001</task_id>" in first_notifications[0]
+    assert "bg_0002" in manager.tasks
+
+    second_notifications = manager.collect(second_owner)
+
+    assert len(second_notifications) == 1
+    assert "<task_id>bg_0002</task_id>" in second_notifications[0]
+    assert manager.tasks == {}
+
+
+def test_inject_background_results_uses_runtime_identity(monkeypatch):
+    runtime = SimpleNamespace(session_id="session-1", agent_id="agent-1")
+    messages = [{"role": "user", "content": "continue"}]
+    captured = []
+
+    monkeypatch.setattr(
+        powershell,
+        "collect_background_results",
+        lambda owner: captured.append(owner) or ["<task_notification />"],
+    )
+
+    assert powershell.inject_background_results(runtime, messages) == 1
+    assert captured == [("session-1", "agent-1")]
+    assert messages[-1]["content"][-1]["text"] == "<task_notification />"
 
 
 def test_run_powershell_returns_command_output(monkeypatch):

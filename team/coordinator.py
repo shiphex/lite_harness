@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from pathlib import Path
 import re
-import inspect
 from threading import RLock
 from time import monotonic
 from typing import TYPE_CHECKING, Callable
@@ -173,15 +172,12 @@ class TeamCoordinator:
                     profile=profile,
                     workspace=worktree.path if worktree is not None else None,
                 )
-                if runtime.session_id != parent_runtime.session_id:
-                    raise TeamError("teammate Runtime 必须属于当前 team session")
-                if runtime.agent_id == parent_runtime.agent_id:
-                    raise TeamError("teammate Runtime 必须拥有独立 agent_id")
-                if any(
-                    existing.agent_id == runtime.agent_id
-                    for existing in self.members.values()
-                ):
-                    raise TeamError("teammate Runtime agent_id 在当前 team 中已使用")
+                self._validate_runtime(
+                    runtime=runtime,
+                    parent_runtime=parent_runtime,
+                    profile=profile,
+                    worktree=worktree,
+                )
                 member = TeamMember(
                     name=name,
                     role=role.strip(),
@@ -211,7 +207,7 @@ class TeamCoordinator:
                 self.member_worktrees.pop(name, None)
                 self.bus.unregister(name)
                 if worktree is not None:
-                    self.worktrees.remove(worktree, discard=True)
+                    self.worktrees.rollback_create(worktree)
                 raise
 
         self._emit(
@@ -239,37 +235,58 @@ class TeamCoordinator:
         profile: TeammateProfile,
         workspace: Path | None,
     ):
-        """调用新 runtime factory，并兼容旧版四参数测试工厂。"""
-
-        kwargs = {
-            "profile": profile,
-            "workspace": workspace,
-        }
-        try:
-            signature = inspect.signature(self.runtime_factory)
-        except (TypeError, ValueError):
-            signature = None
-
-        if signature is not None:
-            parameters = signature.parameters.values()
-            accepts_kwargs = any(
-                parameter.kind == inspect.Parameter.VAR_KEYWORD
-                for parameter in parameters
-            )
-            if not accepts_kwargs:
-                kwargs = {
-                    key: value
-                    for key, value in kwargs.items()
-                    if key in signature.parameters
-                }
+        """按固定 contract 创建 teammate Runtime。"""
 
         return self.runtime_factory(
             parent_runtime,
             self,
             name,
             role,
-            **kwargs,
+            profile=profile,
+            workspace=workspace,
         )
+
+    def _validate_runtime(
+        self,
+        *,
+        runtime: "AgentRuntime",
+        parent_runtime: "AgentRuntime",
+        profile: TeammateProfile,
+        worktree: WorktreeHandle | None,
+    ) -> None:
+        """校验 teammate Runtime 的 identity、workspace 和 state root 不变量。"""
+
+        if runtime.session_id != parent_runtime.session_id:
+            raise TeamError("teammate Runtime 必须属于当前 team session")
+        if runtime.agent_id == parent_runtime.agent_id:
+            raise TeamError("teammate Runtime 必须拥有独立 agent_id")
+        if any(
+            existing.agent_id == runtime.agent_id
+            for existing in self.members.values()
+        ):
+            raise TeamError("teammate Runtime agent_id 在当前 team 中已使用")
+
+        try:
+            actual_workspace = Path(runtime.paths.workspace).resolve()
+            actual_state_root = Path(runtime.paths.state_root).resolve()
+        except AttributeError as error:
+            raise TeamError(
+                "teammate Runtime 必须提供 paths.workspace 和 paths.state_root"
+            ) from error
+
+        expected_workspace = (
+            worktree.path
+            if profile == TeammateProfile.WRITER and worktree is not None
+            else Path(parent_runtime.paths.workspace)
+        ).resolve()
+        if actual_workspace != expected_workspace:
+            raise TeamError(
+                "teammate Runtime workspace 与分配的 workspace 不一致"
+            )
+        if actual_state_root != self.workspace:
+            raise TeamError(
+                "teammate Runtime state_root 必须等于 lead workspace"
+            )
 
     def send(
         self,

@@ -338,6 +338,7 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
             try:
                 task_id = tools.start_background_task(
                     block,
+                    owner=(runtime.session_id, runtime.agent_id),
                     workspace=runtime.paths.workspace,
                 )
                 output = (
@@ -573,7 +574,7 @@ def query_loop(runtime: AgentRuntime):
         else:
             messages.append({"role": "user", "content": results})
 
-        tools.inject_background_results(messages)
+        tools.inject_background_results(runtime, messages)
             
         # 更新上下文
 

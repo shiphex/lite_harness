@@ -24,7 +24,7 @@ def make_runtime(tmp_path, name, session_id, events):
             turn_count=0,
             max_output_tokens=100,
         ),
-        paths=SimpleNamespace(workspace=tmp_path),
+        paths=SimpleNamespace(workspace=tmp_path, state_root=tmp_path),
         events=events,
     )
 
@@ -41,7 +41,15 @@ def make_coordinator(
     events = SynchronizedEventSink(memory_sink)
     lead = make_runtime(tmp_path, "lead", "session", events)
 
-    def runtime_factory(parent, coordinator, name, role):
+    def runtime_factory(
+        parent,
+        coordinator,
+        name,
+        role,
+        *,
+        profile,
+        workspace,
+    ):
         return make_runtime(tmp_path, name, parent.session_id, parent.events)
 
     coordinator = TeamCoordinator(
@@ -301,7 +309,15 @@ def test_identity_binding_rejects_unbound_cross_session_and_fake_lead(tmp_path, 
 def test_spawn_startup_failure_cleans_partial_member(tmp_path, monkeypatch):
     coordinator, lead, _ = make_coordinator(tmp_path, monkeypatch)
 
-    def fail_factory(parent, current_coordinator, name, role):
+    def fail_factory(
+        parent,
+        current_coordinator,
+        name,
+        role,
+        *,
+        profile,
+        workspace,
+    ):
         raise RuntimeError("runtime factory failed")
 
     coordinator.runtime_factory = fail_factory
@@ -316,6 +332,60 @@ def test_spawn_startup_failure_cleans_partial_member(tmp_path, monkeypatch):
     assert "alice" not in coordinator.members
     with pytest.raises(KeyError):
         coordinator.bus.send(TeamMessage("lead", "alice", "hello"))
+
+
+def test_runtime_factory_contract_is_not_silently_downgraded(
+    tmp_path,
+    monkeypatch,
+):
+    coordinator, lead, _ = make_coordinator(tmp_path, monkeypatch)
+
+    def old_factory(parent, current_coordinator, name, role):
+        return make_runtime(tmp_path, name, parent.session_id, parent.events)
+
+    coordinator.runtime_factory = old_factory
+
+    with pytest.raises(TypeError):
+        coordinator.spawn(
+            parent_runtime=lead,
+            name="alice",
+            role="reviewer",
+            prompt="review",
+        )
+
+    assert "alice" not in coordinator.members
+
+
+def test_teammate_runtime_state_root_must_be_lead_workspace(
+    tmp_path,
+    monkeypatch,
+):
+    coordinator, lead, _ = make_coordinator(tmp_path, monkeypatch)
+
+    def wrong_state_root_factory(
+        parent,
+        current_coordinator,
+        name,
+        role,
+        *,
+        profile,
+        workspace,
+    ):
+        runtime = make_runtime(tmp_path, name, parent.session_id, parent.events)
+        runtime.paths.state_root = tmp_path / "wrong-state-root"
+        return runtime
+
+    coordinator.runtime_factory = wrong_state_root_factory
+
+    with pytest.raises(TeamError, match="state_root"):
+        coordinator.spawn(
+            parent_runtime=lead,
+            name="alice",
+            role="reviewer",
+            prompt="review",
+        )
+
+    assert "alice" not in coordinator.members
 
 
 def test_worker_start_failure_keeps_failed_roster_and_event_order(tmp_path, monkeypatch):

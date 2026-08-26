@@ -18,6 +18,9 @@ from pathlib import Path
 from .tool_class import ToolContext
 
 
+RuntimeKey = tuple[str, str]
+
+
 _shell_process: set[subprocess.Popen] = set()
 """ 正在运行的 PowerShell 进程集合。 
 
@@ -264,13 +267,22 @@ class BackgroundManager:
         self._counter = 0
         self._lock = threading.Lock()
 
-    def start(self, block, workspace: Path | str | None = None) -> str:
+    def start(
+        self,
+        block,
+        *,
+        owner: RuntimeKey,
+        workspace: Path | str | None = None,
+    ) -> str:
         """ 启动后台任务。
         
         启动后台任务，用于执行 Bash 命令或 PowerShell 命令。
         
         Args:
             block: 包含命令的工具调用块。
+            owner: 创建任务的 Runtime identity，格式为
+                ``(session_id, agent_id)``。
+            workspace: 任务使用的 Runtime workspace。
             
         Returns:
             任务 ID。
@@ -280,6 +292,12 @@ class BackgroundManager:
         command = block.input.get("command")
         if not isinstance(command, str) or not command.strip():
             raise ValueError("Bash、PowerShell 命令的命令参数不能为空。")
+        if (
+            not isinstance(owner, tuple)
+            or len(owner) != 2
+            or not all(isinstance(item, str) and item for item in owner)
+        ):
+            raise ValueError("后台任务 owner 必须是 (session_id, agent_id)")
 
         with self._lock:
             self._counter += 1
@@ -288,6 +306,7 @@ class BackgroundManager:
                 "tool_use_id": block.id,
                 "command": command,
                 "status": "running",
+                "owner": owner,
             }
 
         thread = threading.Thread(
@@ -339,7 +358,7 @@ class BackgroundManager:
             self.results[task_id] = result
             self._ready.append(task_id)
 
-    def collect(self) -> list[str]:
+    def collect(self, owner: RuntimeKey) -> list[str]:
         """ 收集后台任务结果。
         
         收集后台任务结果，用于获取已完成任务的 ID、状态、命令和摘要。
@@ -347,14 +366,28 @@ class BackgroundManager:
         Returns:
             list[str]: 包含任务通知的 XML 字符串列表。
         """
+        if (
+            not isinstance(owner, tuple)
+            or len(owner) != 2
+            or not all(isinstance(item, str) and item for item in owner)
+        ):
+            raise ValueError("后台任务 owner 必须是 (session_id, agent_id)")
+
         with self._lock:
             ready = []
+            remaining = []
             for task_id in self._ready:
-                task = self.tasks.pop(task_id, None)
+                task = self.tasks.get(task_id)
+                if task is None:
+                    continue
+                if task.get("owner") != owner:
+                    remaining.append(task_id)
+                    continue
+                task = self.tasks.pop(task_id)
                 result = self.results.pop(task_id, "")
                 if task is not None:
                     ready.append((task_id, task, result))
-            self._ready.clear()
+            self._ready = remaining
 
         notifications = []
         for task_id, task, result in ready:
@@ -396,30 +429,36 @@ def should_run_background(tool_name: str, tool_input: dict) -> bool:
 
 def start_background_task(
     block,
+    *,
+    owner: RuntimeKey,
     workspace: Path | str | None = None,
 ) -> str:
     """启动后台命令，并固定它的 Runtime workspace。"""
 
-    return BACKGROUND.start(block, workspace=workspace)
+    return BACKGROUND.start(block, owner=owner, workspace=workspace)
 
 
-def collect_background_results() -> list[str]:
-    return BACKGROUND.collect()
+def collect_background_results(owner: RuntimeKey) -> list[str]:
+    """收集指定 Runtime 创建的后台任务结果。"""
+
+    return BACKGROUND.collect(owner)
 
 
-def inject_background_results(messages: list) -> int:
+def inject_background_results(runtime, messages: list) -> int:
     """ 向消息列表中注入后台任务结果。
     
     该函数用于将后台任务结果注入到消息列表中。
     每个任务通知会转换为一个文本块，然后添加到消息列表中。
     
     Args:
+        runtime: 当前 Agent Runtime，用于限定任务 owner。
         messages: 包含消息的列表，每个消息是一个字典，包含 role 和 content 键。
         
     Returns:
         注入的任务通知数量。
     """
-    notifications = collect_background_results()
+    owner = (runtime.session_id, runtime.agent_id)
+    notifications = collect_background_results(owner)
     if not notifications:
         return 0
 

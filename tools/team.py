@@ -54,7 +54,8 @@ TEAM_LEAD_TOOLS = [
     {
         "name": "spawn_teammate",
         "description": (
-            "创建一个项目文件只读、可持续接收 follow-up 的 teammate。"
+            "创建一个持久 teammate。researcher 与 lead 共享 workspace 且只能只读；"
+            "writer 使用独立 Git worktree 并可以修改其中的文件。"
             "该操作必须经过用户审批。"
         ),
         "input_schema": {

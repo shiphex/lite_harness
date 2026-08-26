@@ -4,6 +4,7 @@ from event import NullEventSink
 from team.contract import TeammateProfile
 from team.factory import create_teammate_runtime
 from tools.task_system import TaskStore
+from tools.team import TEAM_LEAD_TOOLS
 
 
 def test_teammate_runtime_is_isolated_and_read_only(tmp_path):
@@ -101,3 +102,12 @@ def test_writer_runtime_uses_worktree_and_shared_state_root(tmp_path):
     assert {"subagent", "spawn_teammate", "create_task", "update_task"}.isdisjoint(
         tool_names
     )
+
+
+def test_spawn_tool_description_matches_profile_capabilities():
+    tool = next(item for item in TEAM_LEAD_TOOLS if item["name"] == "spawn_teammate")
+
+    assert "researcher" in tool["description"]
+    assert "writer" in tool["description"]
+    assert "只读" in tool["description"]
+    assert "独立 Git worktree" in tool["description"]
