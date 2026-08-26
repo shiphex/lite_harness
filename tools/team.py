@@ -130,7 +130,10 @@ def bind_team_handlers(
     def list_team(context: ToolContext) -> str:
         """返回当前 team 快照。"""
 
-        snapshot = coordinator.snapshot()
+        try:
+            snapshot = coordinator.snapshot(context.runtime)
+        except TeamError as error:
+            return _team_error_result(error)
         return json.dumps(snapshot, ensure_ascii=False, indent=2, default=str)
 
     handlers = {

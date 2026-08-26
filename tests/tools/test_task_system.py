@@ -23,6 +23,30 @@ def test_task_store_instances_are_isolated(tmp_path):
     assert second.list() == []
 
 
+def test_task_owner_limit_is_opt_in(tmp_path):
+    """普通 TaskStore 不限额，team-scoped TaskStore 可限制 owner 的活跃任务。"""
+
+    unrestricted = TaskStore(tmp_path / "unrestricted")
+    first = unrestricted.create("first", "")
+    second = unrestricted.create("second", "")
+    assert claim_task(first.id, owner="alice", store=unrestricted).startswith("Claimed")
+    assert claim_task(second.id, owner="alice", store=unrestricted).startswith("Claimed")
+
+    limited = TaskStore(tmp_path / "limited", max_active_tasks_per_owner=1)
+    first_limited = limited.create("first", "")
+    second_limited = limited.create("second", "")
+    assert claim_task(
+        first_limited.id,
+        owner="alice",
+        store=limited,
+    ).startswith("Claimed")
+    assert first_limited.id in claim_task(
+        second_limited.id,
+        owner="alice",
+        store=limited,
+    )
+
+
 def test_concurrent_claim_allows_only_one_owner(tmp_path):
     """并发 claim 必须作为一个完整事务执行。"""
 

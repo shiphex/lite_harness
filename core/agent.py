@@ -170,6 +170,7 @@ def create_master_session(
         team=coordinator,
         session_id=session_id,
     )
+    coordinator.bind_lead(runtime)
     return MasterSession(runtime=runtime, team=coordinator)
 
 

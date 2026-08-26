@@ -40,6 +40,10 @@ class TeamError(ValueError):
     """可预期的 Agent Teams 协作错误。"""
 
 
+class TeamPermissionError(TeamError):
+    """Runtime 不具备当前 TeamCoordinator 操作权限时抛出。"""
+
+
 class TeamCoordinator:
     """管理单个 lead session 内的 Agent Team。"""
 
@@ -69,7 +73,12 @@ class TeamCoordinator:
         self.team_id = team_id
         self.workspace = workspace
         self.team_dir = workspace / ".agents" / "teams" / team_id
-        self.tasks = TaskStore(self.team_dir / "tasks")
+        # Team session 中的每个 owner 同时只能推进一个 active task；普通
+        # TaskStore 不配置这一策略，因而保持原有的通用任务语义。
+        self.tasks = TaskStore(
+            self.team_dir / "tasks",
+            max_active_tasks_per_owner=1,
+        )
         self.runtime_factory = runtime_factory
         self.max_members = max_members
 
@@ -79,6 +88,26 @@ class TeamCoordinator:
         self.workers: dict[str, TeammateWorker] = {}
         # roster 与 Worker 生命周期共享同一把锁，避免维护额外 activity 状态。
         self._lock = RLock()
+        self._session_id: str | None = None
+        self._lead_agent_id: str | None = None
+        self._lead_runtime: AgentRuntime | None = None
+
+    def bind_lead(self, runtime: "AgentRuntime") -> None:
+        """绑定当前 TeamCoordinator 的唯一 lead Runtime identity。
+
+        Args:
+            runtime: 当前 master session 创建完成后的 lead Runtime。
+
+        Raises:
+            TeamError: 当前 coordinator 已绑定 lead 时抛出。
+        """
+
+        with self._lock:
+            if self._lead_agent_id is not None:
+                raise TeamError("team lead 已绑定")
+            self._session_id = runtime.session_id
+            self._lead_agent_id = runtime.agent_id
+            self._lead_runtime = runtime
 
     def spawn(
         self,
@@ -224,13 +253,17 @@ class TeamCoordinator:
             )
         return messages
 
-    def list_members(self) -> list[TeamMember]:
+    def list_members(self, runtime: "AgentRuntime") -> list[TeamMember]:
         """返回带动态 ``current_task`` 的 teammate 快照。
+
+        Args:
+            runtime: 请求当前 team roster 的 lead 或 teammate Runtime。
 
         Returns:
             list[TeamMember]: 按创建顺序排列的成员副本。
         """
 
+        self._runtime_name(runtime)
         tasks = self.tasks.list()
         current_tasks = {}
         for task in tasks:
@@ -242,8 +275,11 @@ class TeamCoordinator:
                 for member in self.members.values()
             ]
 
-    def snapshot(self) -> dict:
+    def snapshot(self, runtime: "AgentRuntime") -> dict:
         """返回 roster 和 team-scoped task 的 JSON 友好快照。
+
+        Args:
+            runtime: 请求当前 team 快照的 lead 或 teammate Runtime。
 
         Returns:
             dict: 包含 team_id、members 和 tasks 的当前状态。
@@ -251,7 +287,7 @@ class TeamCoordinator:
 
         return {
             "team_id": self.team_id,
-            "members": [asdict(member) for member in self.list_members()],
+            "members": [asdict(member) for member in self.list_members(runtime)],
             "tasks": [asdict(task) for task in self.tasks.list()],
         }
 
@@ -310,21 +346,25 @@ class TeamCoordinator:
             worker.join(max(0.0, deadline - monotonic()))
 
     def _runtime_name(self, runtime: "AgentRuntime") -> str:
-        """校验 Runtime 并返回其直接声明的 team name。"""
+        """校验 Runtime 的 session/agent identity 并返回其 team name。"""
 
-        if runtime.agent_name == "lead":
-            return "lead"
         with self._lock:
-            member = self.members.get(runtime.agent_name)
-        if member is None or member.agent_id != runtime.agent_id:
-            raise TeamError("当前 Runtime 不属于该 team")
-        return member.name
+            if self._session_id is None or self._lead_agent_id is None:
+                raise TeamPermissionError("team lead 尚未绑定")
+            if runtime.session_id != self._session_id:
+                raise TeamPermissionError("当前 Runtime 不属于该 team session")
+            if runtime.agent_id == self._lead_agent_id:
+                return "lead"
+            for member in self.members.values():
+                if member.agent_id == runtime.agent_id:
+                    return member.name
+        raise TeamPermissionError("当前 Runtime 不属于该 team")
 
     def _assert_lead(self, runtime: "AgentRuntime") -> None:
         """校验调用 Runtime 是否为 team lead。"""
 
-        if runtime.agent_name != "lead":
-            raise TeamError("只有 team lead 可以执行该操作")
+        if self._runtime_name(runtime) != "lead":
+            raise TeamPermissionError("只有 team lead 可以执行该操作")
 
     def _validate_member_input(self, name: str, role: str, prompt: str) -> None:
         """校验 teammate identity 和 assignment 文本。"""

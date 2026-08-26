@@ -5,7 +5,7 @@ import pytest
 
 from event import EventType, MemoryEventSink, SynchronizedEventSink
 from team.contract import MemberStatus, TeamMessage
-from team.coordinator import TeamCoordinator, TeamError
+from team.coordinator import TeamCoordinator, TeamError, TeamPermissionError
 import team.worker as worker_module
 from tools.task_system import claim_task, complete_task
 
@@ -29,7 +29,14 @@ def make_runtime(tmp_path, name, session_id, events):
     )
 
 
-def make_coordinator(tmp_path, monkeypatch, *, run_turn=None, max_members=3):
+def make_coordinator(
+    tmp_path,
+    monkeypatch,
+    *,
+    run_turn=None,
+    max_members=3,
+    bind_lead=True,
+):
     memory_sink = MemoryEventSink()
     events = SynchronizedEventSink(memory_sink)
     lead = make_runtime(tmp_path, "lead", "session", events)
@@ -43,6 +50,8 @@ def make_coordinator(tmp_path, monkeypatch, *, run_turn=None, max_members=3):
         runtime_factory=runtime_factory,
         max_members=max_members,
     )
+    if bind_lead:
+        coordinator.bind_lead(lead)
 
     if run_turn is None:
         def run_turn(runtime, prompt):
@@ -115,12 +124,37 @@ def test_current_task_is_derived_from_team_task_store(tmp_path, monkeypatch):
     collect_messages(coordinator, lead, 1)
 
     claim_task(task.id, owner="alice", store=coordinator.tasks)
-    assert coordinator.list_members()[0].current_task == task.id
-    assert coordinator.snapshot()["members"][0]["current_task"] == task.id
+    assert coordinator.list_members(lead)[0].current_task == task.id
+    assert coordinator.snapshot(lead)["members"][0]["current_task"] == task.id
 
     complete_task(task.id, owner="alice", store=coordinator.tasks)
-    assert coordinator.list_members()[0].current_task is None
+    assert coordinator.list_members(lead)[0].current_task is None
     coordinator.shutdown_all()
+
+
+def test_team_task_store_limits_each_owner_to_one_active_task(tmp_path, monkeypatch):
+    coordinator, _, _ = make_coordinator(tmp_path, monkeypatch)
+    first = coordinator.tasks.create("first", "")
+    second = coordinator.tasks.create("second", "")
+    other_owner = coordinator.tasks.create("other owner", "")
+
+    assert claim_task(first.id, owner="alice", store=coordinator.tasks).startswith(
+        "Claimed"
+    )
+    denied = claim_task(second.id, owner="alice", store=coordinator.tasks)
+    assert first.id in denied
+    assert claim_task(
+        other_owner.id,
+        owner="bob",
+        store=coordinator.tasks,
+    ).startswith("Claimed")
+
+    assert complete_task(first.id, owner="alice", store=coordinator.tasks).startswith(
+        "Completed"
+    )
+    assert claim_task(second.id, owner="alice", store=coordinator.tasks).startswith(
+        "Claimed"
+    )
 
 
 def test_worker_failure_marks_member_failed_and_reports_result(tmp_path, monkeypatch):
@@ -196,7 +230,7 @@ def test_non_lead_cannot_spawn_or_shutdown(tmp_path, monkeypatch):
     coordinator, lead, _ = make_coordinator(tmp_path, monkeypatch)
     outsider = make_runtime(tmp_path, "outsider", "session", lead.events)
 
-    with pytest.raises(TeamError, match="只有 team lead"):
+    with pytest.raises(TeamPermissionError):
         coordinator.spawn(
             parent_runtime=outsider,
             name="alice",
@@ -210,8 +244,54 @@ def test_non_lead_cannot_spawn_or_shutdown(tmp_path, monkeypatch):
         role="reviewer",
         prompt="review",
     )
-    with pytest.raises(TeamError, match="只有 team lead"):
+    with pytest.raises(TeamPermissionError):
         coordinator.shutdown(outsider, "alice")
+    coordinator.shutdown_all()
+
+
+def test_identity_binding_rejects_unbound_cross_session_and_fake_lead(tmp_path, monkeypatch):
+    coordinator, lead, _ = make_coordinator(
+        tmp_path,
+        monkeypatch,
+        bind_lead=False,
+    )
+
+    with pytest.raises(TeamPermissionError, match="尚未绑定"):
+        coordinator.spawn(
+            parent_runtime=lead,
+            name="alice",
+            role="reviewer",
+            prompt="review",
+        )
+
+    coordinator.bind_lead(lead)
+    with pytest.raises(TeamError, match="已绑定"):
+        coordinator.bind_lead(lead)
+
+    fake_lead = make_runtime(tmp_path, "fake", lead.session_id, lead.events)
+    fake_lead.agent_name = "lead"
+    with pytest.raises(TeamPermissionError):
+        coordinator.spawn(
+            parent_runtime=fake_lead,
+            name="alice",
+            role="reviewer",
+            prompt="review",
+        )
+
+    cross_session = make_runtime(tmp_path, "lead", "other-session", lead.events)
+    with pytest.raises(TeamPermissionError):
+        coordinator.read_messages(cross_session)
+    with pytest.raises(TeamPermissionError):
+        coordinator.snapshot(fake_lead)
+
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="alice",
+        role="reviewer",
+        prompt="review",
+    )
+    with pytest.raises(TeamPermissionError):
+        coordinator.shutdown(fake_lead, "alice")
     coordinator.shutdown_all()
 
 

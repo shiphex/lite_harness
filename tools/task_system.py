@@ -51,12 +51,28 @@ class Task:
 
 class TaskStore:
 
-    def __init__(self, directory: Path):
+    def __init__(
+        self,
+        directory: Path,
+        *,
+        max_active_tasks_per_owner: int | None = None,
+    ):
         """ 任务存储类 
         Args:
             directory (Path): 任务存储根目录
+            max_active_tasks_per_owner: 每个 owner 可同时拥有的 in_progress task
+                数量上限；None 表示不限制。
         """
+        if (
+            max_active_tasks_per_owner is not None
+            and (
+                not isinstance(max_active_tasks_per_owner, int)
+                or max_active_tasks_per_owner <= 0
+            )
+        ):
+            raise ValueError("max_active_tasks_per_owner 必须是正整数或 None")
         self.directory = directory
+        self.max_active_tasks_per_owner = max_active_tasks_per_owner
         # 同一 TaskStore 的复合读写必须共享一把可重入锁，避免并发 claim 覆盖 owner。
         self._lock = RLock()
 
@@ -411,6 +427,20 @@ def claim_task(
         task = task_store.load(task_id)
         if task.status != "pending":
             return f"任务 {task_id} 状态不是 pending，不能被领取"
+        if task_store.max_active_tasks_per_owner is not None:
+            active_tasks = [
+                candidate
+                for candidate in task_store.list()
+                if (
+                    candidate.owner == owner
+                    and candidate.status == "in_progress"
+                )
+            ]
+            if len(active_tasks) >= task_store.max_active_tasks_per_owner:
+                return (
+                    f"{owner} 已拥有 active task "
+                    f"{active_tasks[0].id}，不能领取 {task_id}"
+                )
         dependencies = incomplete_dependencies(task, store=task_store)
         if dependencies:
             return f"任务 {task_id} 有未完成依赖 {dependencies}，不能被领取"

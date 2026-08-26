@@ -194,4 +194,6 @@ def test_create_master_session_adds_team_tools(monkeypatch, tmp_path):
     } <= tool_names
     assert "wait_teammates" not in tool_names
     assert session.runtime.agent_name == "lead"
+    assert session.team._lead_agent_id == session.runtime.agent_id
+    assert session.team._session_id == session.runtime.session_id
     session.close()

@@ -23,6 +23,7 @@ def test_agent_team_public_interfaces_have_docstrings():
         MessageBus.send,
         MessageBus.receive,
         TeamCoordinator,
+        TeamCoordinator.bind_lead,
         TeamCoordinator.spawn,
         TeamCoordinator.send,
         TeamCoordinator.read_messages,
