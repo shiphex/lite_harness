@@ -1,5 +1,5 @@
 ---
-name: Git-Smart-Commit
+name: git-smart-commit
 description: 将杂乱的 git 变更，依功能逻辑自动拆分成多个有意义的 conventional commit
 ---
 
