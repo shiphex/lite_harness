@@ -25,10 +25,11 @@ def test_run_subagent_returns_text_from_query_loop_history(monkeypatch):
         session_id="session",
         agent_id="agent",
         agent_name="subagent",
-        state=SimpleNamespace(turn_count=0),
+        state=SimpleNamespace(turn_count=0, messages=[]),
         paths=SimpleNamespace(workspace="workspace"),
         events=SimpleNamespace(emit=lambda event: None),
         hooks=SimpleNamespace(run=lambda *args: None),
+        begin_run=lambda: None,
     )
     final_state = SimpleNamespace(messages=[
         {
@@ -43,9 +44,9 @@ def test_run_subagent_returns_text_from_query_loop_history(monkeypatch):
         lambda *args, **kwargs: runtime,
     )
 
-    import core.loop as loop
+    import core.runner as runner
     monkeypatch.setattr(
-        loop,
+        runner,
         "query_loop",
         lambda current_runtime: (final_state, {"reason": "completed"}),
     )
@@ -67,6 +68,7 @@ def _patch_run_subagent(monkeypatch, messages, assertion=None):
         paths=SimpleNamespace(workspace="workspace"),
         events=SimpleNamespace(emit=lambda event: None),
         hooks=SimpleNamespace(run=lambda *args: None),
+        begin_run=lambda: None,
     )
 
     def create_runtime(history, *args, **kwargs):
@@ -75,14 +77,14 @@ def _patch_run_subagent(monkeypatch, messages, assertion=None):
 
     monkeypatch.setattr(subagent, "create_subagent_runtime", create_runtime)
 
-    import core.loop as loop
+    import core.runner as runner
 
     def query_loop(current_runtime):
         if assertion is not None:
             assertion(current_runtime)
         return SimpleNamespace(messages=messages), {"reason": "completed"}
 
-    monkeypatch.setattr(loop, "query_loop", query_loop)
+    monkeypatch.setattr(runner, "query_loop", query_loop)
 
 
 def test_run_subagent_passes_description_and_returns_final_text(monkeypatch):

@@ -10,7 +10,6 @@ Typical usage example:
 from typing import List, Dict
 
 import config
-import hook
 import event
 from . import tool_handler
 from .tool_class import ToolContext
@@ -135,9 +134,17 @@ def create_subagent_runtime(history: List,
 
 
 def run_subagent(context: ToolContext, description: str) -> str:
-    """ 运行子智能体。"""
+    """运行一次性 subagent 并返回最终文本。
+
+    Args:
+        context: 当前工具调用上下文。
+        description: 分配给 subagent 的任务说明。
+
+    Returns:
+        str: subagent 最终输出；未输出文本时返回可诊断的回退信息。
+    """
     # 初始化历史记录
-    from core.loop import query_loop
+    from core.runner import run_turn
 
     history = []
 
@@ -155,16 +162,7 @@ def run_subagent(context: ToolContext, description: str) -> str:
             )
     )
 
-    # 执行 UserPromptSubmit hook
-    runtime.hooks.run(
-        hook.HookEvent.USER_PROMPT_SUBMIT,
-        hook.make_hook_context(runtime),
-        description,
-    )
-
-    history.append({"role": "user", "content": description})
-
-    agent_state, status = query_loop(runtime)
+    agent_state, status = run_turn(runtime, description)
 
     # 更新上下文
     history = agent_state.messages
