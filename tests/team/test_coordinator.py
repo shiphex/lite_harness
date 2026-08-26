@@ -1,0 +1,293 @@
+from time import monotonic, sleep
+from types import SimpleNamespace
+
+import pytest
+
+from event import EventType, MemoryEventSink, SynchronizedEventSink
+from team.contract import MemberStatus, TeamMessage
+from team.coordinator import TeamCoordinator, TeamError
+import team.worker as worker_module
+from tools.task_system import claim_task, complete_task
+
+
+def make_runtime(tmp_path, name, session_id, events):
+    return SimpleNamespace(
+        session_id=session_id,
+        agent_id=f"{name}-id",
+        agent_name=name,
+        policy=SimpleNamespace(
+            model={"model_name": "model"},
+            fallback_model={"model_name": "fallback"},
+        ),
+        state=SimpleNamespace(
+            messages=[],
+            turn_count=0,
+            max_output_tokens=100,
+        ),
+        paths=SimpleNamespace(workspace=tmp_path),
+        events=events,
+    )
+
+
+def make_coordinator(tmp_path, monkeypatch, *, run_turn=None, max_members=3):
+    memory_sink = MemoryEventSink()
+    events = SynchronizedEventSink(memory_sink)
+    lead = make_runtime(tmp_path, "lead", "session", events)
+
+    def runtime_factory(parent, coordinator, name, role):
+        return make_runtime(tmp_path, name, parent.session_id, parent.events)
+
+    coordinator = TeamCoordinator(
+        team_id="team-session",
+        workspace=tmp_path,
+        runtime_factory=runtime_factory,
+        max_members=max_members,
+    )
+
+    if run_turn is None:
+        def run_turn(runtime, prompt):
+            runtime.state.messages.append({"role": "user", "content": prompt})
+            runtime.state.messages.append({
+                "role": "assistant",
+                "content": [{"type": "text", "text": f"result:{runtime.agent_name}"}],
+            })
+            return runtime.state, {"reason": "completed"}
+
+    monkeypatch.setattr(worker_module, "run_turn", run_turn)
+    return coordinator, lead, memory_sink
+
+
+def collect_messages(coordinator, lead, count, timeout=2):
+    """在测试中收集指定数量的异步消息。"""
+
+    messages = []
+    deadline = monotonic() + timeout
+    while len(messages) < count and monotonic() < deadline:
+        messages.extend(coordinator.read_messages(lead))
+        if len(messages) < count:
+            sleep(0.01)
+    return messages
+
+
+def test_spawn_followup_persists_runtime_and_shutdown(tmp_path, monkeypatch):
+    coordinator, lead, memory_sink = make_coordinator(tmp_path, monkeypatch)
+
+    member = coordinator.spawn(
+        parent_runtime=lead,
+        name="alice",
+        role="reviewer",
+        prompt="review runtime",
+    )
+    first = collect_messages(coordinator, lead, 1)
+    teammate_runtime = coordinator.workers["alice"].runtime
+
+    assert member.current_task is None
+    assert [item.content for item in first] == ["result:alice"]
+    assert teammate_runtime.state.messages is not lead.state.messages
+    assert teammate_runtime.session_id == lead.session_id
+    assert teammate_runtime.agent_id != lead.agent_id
+
+    coordinator.send(lead, "alice", "check one more detail")
+    followup = collect_messages(coordinator, lead, 1)
+    assert [item.content for item in followup] == ["result:alice"]
+    assert len(teammate_runtime.state.messages) == 4
+
+    assert coordinator.shutdown(lead, "alice") is True
+    coordinator.workers["alice"].join(2)
+    assert coordinator.members["alice"].status == MemberStatus.STOPPED
+
+    event_types = [item.type for item in memory_sink.events]
+    assert EventType.TEAM_MEMBER_SPAWNED in event_types
+    assert EventType.TEAM_MESSAGE_SENT in event_types
+    assert EventType.TEAM_MESSAGE_RECEIVED in event_types
+    assert EventType.TEAM_MEMBER_STOPPED in event_types
+
+
+def test_current_task_is_derived_from_team_task_store(tmp_path, monkeypatch):
+    coordinator, lead, _ = make_coordinator(tmp_path, monkeypatch)
+    task = coordinator.tasks.create("review runtime", "")
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="alice",
+        role="reviewer",
+        prompt="review runtime",
+    )
+    collect_messages(coordinator, lead, 1)
+
+    claim_task(task.id, owner="alice", store=coordinator.tasks)
+    assert coordinator.list_members()[0].current_task == task.id
+    assert coordinator.snapshot()["members"][0]["current_task"] == task.id
+
+    complete_task(task.id, owner="alice", store=coordinator.tasks)
+    assert coordinator.list_members()[0].current_task is None
+    coordinator.shutdown_all()
+
+
+def test_worker_failure_marks_member_failed_and_reports_result(tmp_path, monkeypatch):
+    def fail_run(runtime, prompt):
+        raise RuntimeError("model failed")
+
+    coordinator, lead, _ = make_coordinator(
+        tmp_path,
+        monkeypatch,
+        run_turn=fail_run,
+    )
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="alice",
+        role="reviewer",
+        prompt="fail",
+    )
+    result = collect_messages(coordinator, lead, 1)
+    coordinator.workers["alice"].join(2)
+
+    assert "Teammate failed" in result[0].content
+    assert coordinator.members["alice"].status == MemberStatus.FAILED
+
+
+def test_spawn_validates_name_capacity_and_name_reuse(tmp_path, monkeypatch):
+    coordinator, lead, _ = make_coordinator(
+        tmp_path,
+        monkeypatch,
+        max_members=1,
+    )
+
+    with pytest.raises(TeamError, match="name"):
+        coordinator.spawn(
+            parent_runtime=lead,
+            name="invalid name",
+            role="reviewer",
+            prompt="review",
+        )
+
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="alice",
+        role="reviewer",
+        prompt="review",
+    )
+    with pytest.raises(TeamError, match="上限"):
+        coordinator.spawn(
+            parent_runtime=lead,
+            name="bob",
+            role="reviewer",
+            prompt="review",
+        )
+
+    coordinator.shutdown(lead, "alice")
+    coordinator.workers["alice"].join(2)
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="bob",
+        role="reviewer",
+        prompt="review",
+    )
+    with pytest.raises(TeamError, match="已使用"):
+        coordinator.spawn(
+            parent_runtime=lead,
+            name="alice",
+            role="reviewer",
+            prompt="review",
+        )
+    coordinator.shutdown_all()
+
+
+def test_non_lead_cannot_spawn_or_shutdown(tmp_path, monkeypatch):
+    coordinator, lead, _ = make_coordinator(tmp_path, monkeypatch)
+    outsider = make_runtime(tmp_path, "outsider", "session", lead.events)
+
+    with pytest.raises(TeamError, match="只有 team lead"):
+        coordinator.spawn(
+            parent_runtime=outsider,
+            name="alice",
+            role="reviewer",
+            prompt="review",
+        )
+
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="alice",
+        role="reviewer",
+        prompt="review",
+    )
+    with pytest.raises(TeamError, match="只有 team lead"):
+        coordinator.shutdown(outsider, "alice")
+    coordinator.shutdown_all()
+
+
+def test_spawn_startup_failure_cleans_partial_member(tmp_path, monkeypatch):
+    coordinator, lead, _ = make_coordinator(tmp_path, monkeypatch)
+
+    def fail_factory(parent, current_coordinator, name, role):
+        raise RuntimeError("runtime factory failed")
+
+    coordinator.runtime_factory = fail_factory
+    with pytest.raises(RuntimeError, match="runtime factory failed"):
+        coordinator.spawn(
+            parent_runtime=lead,
+            name="alice",
+            role="reviewer",
+            prompt="review",
+        )
+
+    assert "alice" not in coordinator.members
+    with pytest.raises(KeyError):
+        coordinator.bus.send(TeamMessage("lead", "alice", "hello"))
+
+
+def test_peer_message_result_goes_to_lead_without_reply_loop(tmp_path, monkeypatch):
+    coordinator, lead, _ = make_coordinator(tmp_path, monkeypatch)
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="alice",
+        role="reviewer",
+        prompt="alice work",
+    )
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="bob",
+        role="reviewer",
+        prompt="bob work",
+    )
+    collect_messages(coordinator, lead, 2)
+
+    alice_runtime = coordinator.workers["alice"].runtime
+    coordinator.send(alice_runtime, "bob", "check this finding")
+    result = collect_messages(coordinator, lead, 1)
+
+    assert [item.sender for item in result] == ["bob"]
+    assert coordinator.bus.drain("alice") == []
+    coordinator.shutdown_all()
+
+
+def test_messages_validate_recipient_and_use_runtime_metadata(tmp_path, monkeypatch):
+    coordinator, lead, memory_sink = make_coordinator(tmp_path, monkeypatch)
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="alice",
+        role="reviewer",
+        prompt="review",
+    )
+    collect_messages(coordinator, lead, 1)
+    alice_runtime = coordinator.workers["alice"].runtime
+
+    with pytest.raises(TeamError, match="未知 teammate"):
+        coordinator.send(alice_runtime, "missing", "hello")
+
+    coordinator.send(alice_runtime, "lead", "explicit update")
+    coordinator.read_messages(lead)
+    sent = [
+        item for item in memory_sink.events
+        if item.type == EventType.TEAM_MESSAGE_SENT
+        and item.data.get("sender") == "alice"
+        and item.data.get("kind") == "message"
+    ][-1]
+    received = [
+        item for item in memory_sink.events
+        if item.type == EventType.TEAM_MESSAGE_RECEIVED
+        and item.data.get("sender") == "alice"
+        and item.data.get("kind") == "message"
+    ][-1]
+    assert sent.agent_id == alice_runtime.agent_id
+    assert received.agent_id == lead.agent_id
+    coordinator.shutdown_all()

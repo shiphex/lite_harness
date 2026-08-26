@@ -30,6 +30,8 @@ class EventType(StrEnum):
         - `compact.completed`：压缩完成
         - `approval.requested`：审批请求
         - `approval.resolved`：审批解决
+        - `team.member.*`：teammate 生命周期事件
+        - `team.message.*`：mailbox 消息事件
         - `error`：错误
     """
     # system
@@ -53,6 +55,13 @@ class EventType(StrEnum):
 
     # todo
     TODO_UPDATED = "todo.updated"
+
+    # agent teams
+    TEAM_MEMBER_SPAWNED = "team.member.spawned"
+    TEAM_MEMBER_STATUS_CHANGED = "team.member.status_changed"
+    TEAM_MEMBER_STOPPED = "team.member.stopped"
+    TEAM_MESSAGE_SENT = "team.message.sent"
+    TEAM_MESSAGE_RECEIVED = "team.message.received"
 
     # compact
     COMPACT_STARTED = "compact.started"

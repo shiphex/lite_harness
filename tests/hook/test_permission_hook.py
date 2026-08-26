@@ -32,3 +32,17 @@ def test_permission_hook_allows_safe_command():
     assert result.action == HookAction.CONTINUE
     assert result.blocked is False
     assert result.approval_required is False
+
+
+def test_permission_hook_requires_spawn_teammate_approval():
+    result = permission_hook(
+        None,
+        SimpleNamespace(
+            name="spawn_teammate",
+            input={"name": "alice", "role": "reviewer", "prompt": "review"},
+        ),
+    )
+
+    assert result.action == HookAction.ASK
+    assert result.approval_required is True
+    assert "teammate" in result.message

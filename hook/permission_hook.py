@@ -96,8 +96,15 @@ def permission_hook(ctx, block):
     from .hook_handler import HookResult
     from .hook_handler import HookAction
 
+    # 创建 teammate 会产生独立模型调用和后台线程，必须由用户逐次确认。
+    if block.name == "spawn_teammate":
+        return HookResult(
+            action=HookAction.ASK,
+            message="创建 teammate 需要用户审批",
+        )
+
     # 禁止命令检测
-    if block.name == "powershell":
+    if block.name == "powershell" or block.name == "bash":
         command = block.input.get("command", "")
         for pattern in DENY_LIST_LINUX + DENY_LIST_POWERSHELL:
             if pattern in command:

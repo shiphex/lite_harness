@@ -12,6 +12,9 @@ def test_event_type_exposes_structured_runtime_values():
     assert EventType.TOOL_COMPLETED == "tool.completed"
     assert EventType.APPROVAL_REQUESTED == "approval.requested"
     assert EventType.APPROVAL_RESOLVED == "approval.resolved"
+    assert EventType.TEAM_MEMBER_SPAWNED == "team.member.spawned"
+    assert EventType.TEAM_MEMBER_STOPPED == "team.member.stopped"
+    assert EventType.TEAM_MESSAGE_RECEIVED == "team.message.received"
 
 
 def test_make_event_adds_runtime_metadata_and_payload():

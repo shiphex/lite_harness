@@ -9,6 +9,7 @@ from .sink import (
     NullEventSink,
     FanoutEventSink,
     MemoryEventSink,
+    SynchronizedEventSink,
 )
 
 
@@ -20,4 +21,5 @@ __all__ = [
     "NullEventSink",
     "FanoutEventSink",
     "MemoryEventSink",
+    "SynchronizedEventSink",
 ]

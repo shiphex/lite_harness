@@ -1,4 +1,11 @@
-from event import EventType, FanoutEventSink, MemoryEventSink, NullEventSink, make_event
+from event import (
+    EventType,
+    FanoutEventSink,
+    MemoryEventSink,
+    NullEventSink,
+    SynchronizedEventSink,
+    make_event,
+)
 
 
 class RuntimeStub:
@@ -37,4 +44,14 @@ def test_fanout_event_sink_forwards_to_every_sink():
 
     assert first.events == [event]
     assert second.events == [event]
+
+
+def test_synchronized_event_sink_forwards_event():
+    memory = MemoryEventSink()
+    sink = SynchronizedEventSink(memory)
+    event = make_event(RuntimeStub(), EventType.TEAM_MEMBER_SPAWNED)
+
+    sink.emit(event)
+
+    assert memory.events == [event]
 
