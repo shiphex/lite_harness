@@ -35,6 +35,10 @@ alice.agent_id = alice-yyyy
 bob.agent_id   = bob-zzzz
 ```
 
+`TeamCoordinator.bind_lead()` 在 master Runtime 创建后绑定 lead 的真实
+`session_id + agent_id`。所有 team 操作都按这组 identity 校验；`agent_name` 仅用于
+显示，不是权限凭证。
+
 teammate 使用空 history 创建，不继承 lead 对话。Worker 在 follow-up 之间复用同一个
 Runtime，因此成员自己的分析上下文可以持续保留。
 
@@ -50,6 +54,8 @@ MasterSession 使用 `.agents/teams/{team_id}/tasks` 下的独立 TaskStore。le
 
 TaskStore 使用单个 `RLock` 保护 create、依赖更新、claim 和 complete 的
 read-modify-write 流程。同一个 team 共享一份 store，不同 team 的任务目录相互隔离。
+team-scoped store 额外限制每个 owner 同时只能拥有一项 `in_progress` task；普通
+TaskStore 保持不限额的通用语义。
 
 `TeamMember.current_task` 不保存重复状态。Coordinator 生成 roster 快照时，根据
 `owner=member.name` 且 `status=in_progress` 的任务动态推导该字段。
@@ -66,6 +72,9 @@ read-modify-write 流程。同一个 team 共享一份 store，不同 team 的�
 `send_message` 支持 lead 与 teammate、teammate 与 teammate 双向通信。peer 消息会触发
 接收方的下一次 `run_turn()`；该轮隐式结果仍统一发给 lead。若要回复 peer，模型必须
 显式调用 `send_message`，从而避免两个 Worker 自动互发 result。
+
+每次 Worker `run_turn()` 完成后都会自动且仅一次向 lead 投递 `result`。因此
+`send_message` 仅用于显式的中间沟通，不应用来重复发送最终结果。
 
 `read_messages` 是非阻塞 drain：按 FIFO 顺序返回并清空当前 Agent 的 mailbox。
 mailbox 只传输消息，不直接操作 Runtime history，也不持久化到磁盘。
@@ -104,6 +113,7 @@ Runtime 的工具定义和 handler allowlist 同时限制，不只依赖 prompt�
 - `team.message.sent`
 - `team.message.received`
 - `team.member.stopped`
+- `team.member.shutdown_timeout`
 
 lead 与 teammate 共享 `SynchronizedEventSink`，每个事件仍使用实际发送或接收消息的
 Runtime metadata。
@@ -111,6 +121,7 @@ Runtime metadata。
 `shutdown_teammate` 设置停止标记，并发送内部 shutdown 消息唤醒等待中的 Worker。它
 不会中断正在执行的 `run_turn()`；当前 run 返回后线程退出。`MasterSession.close()` 会
 请求关闭全部 Worker，并在共享的 5 秒截止时间内等待；未及时结束的线程保持 daemon。
+`shutdown_all()` 会返回这些仍存活的成员，并发布 `team.member.shutdown_timeout` 诊断事件。
 
 ## 7. 本阶段明确不实现
 

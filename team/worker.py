@@ -160,8 +160,8 @@ class TeammateWorker:
                 f"run status={status}"
             )
 
-        # 隐式最终结果始终只发给 lead。peer 回复由模型显式调用 send_message，
-        # 这样 peer 触发的 run 不会在两个 Worker 之间形成自动回复循环。
+        # 每次完成 run 都自动且仅一次将最终结果发给 lead。peer 回复由模型显式
+        # 调用 send_message，因此 peer 触发的 run 不会形成自动回复循环。
         self._send(TeamMessage(
             sender=self.name,
             recipient="lead",

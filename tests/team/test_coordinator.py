@@ -367,6 +367,7 @@ def test_peer_message_result_goes_to_lead_without_reply_loop(tmp_path, monkeypat
     result = collect_messages(coordinator, lead, 1)
 
     assert [item.sender for item in result] == ["bob"]
+    assert [item.kind for item in result] == ["result"]
     assert coordinator.bus.drain("alice") == []
     coordinator.shutdown_all()
 

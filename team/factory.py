@@ -35,7 +35,7 @@ TEAMMATE_PROMPT = """
 1. 你的上下文独立于 team lead，并在 follow-up 之间保留。
 2. 你只能对项目文件进行只读研究、分析和评审。
 3. 使用共享 task 工具查看、认领并完成 lead 创建的任务。
-4. 需要沟通时使用 send_message；peer 回复必须显式发送。
+4. send_message 仅用于中间沟通；每轮最终结果会自动且仅一次回传给 lead。peer 回复必须显式发送。
 5. 不要创建 task、subagent 或 teammate，也不要修改任务依赖。
 """.strip()
 

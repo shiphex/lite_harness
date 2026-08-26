@@ -14,7 +14,10 @@ from tools.tool_class import ToolContext
 TEAM_COMMON_TOOLS = [
     {
         "name": "send_message",
-        "description": "向 lead 或指定 teammate 发送一条单向 team 消息。",
+        "description": (
+            "向 lead 或指定 teammate 发送一条单向中间 team 消息。"
+            "每轮最终结果会由 Worker 自动且仅一次发送给 lead。"
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
