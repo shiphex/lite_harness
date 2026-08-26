@@ -52,6 +52,12 @@ CLI → RuntimeFactory → query_loop → Model / Hook / Tool → EventSink
 5. `ToolExecutor` 执行工具，EventSink 发布运行事件。
 6. 没有新的工具调用时运行 `Stop` Hook，并返回本轮状态。
 
+Agent Teams 在这条主线之上增加轻量协作平面。lead 可以创建最多 3 名默认只读的持久
+teammate；成员共享 team-scoped task 列表和进程内 mailbox，但各自拥有独立 history。
+lead、subagent 与 teammate 均通过 `run_turn() → query_loop()` 执行，不存在第二套
+Agent Loop。当前 MVP 提供 `spawn_teammate`、`send_message`、`read_messages`、
+`list_team` 和 `shutdown_teammate`，暂不包含自动认领、等待协议或并行写代码。
+
 ## 3. 项目结构
 
 ```text
@@ -62,8 +68,10 @@ lite_harness/
 │   └── old_api/                 # 旧版模型 API，保留用于兼容
 ├── core/                        # Agent 核心流程
 │   ├── runtime.py               # AgentRuntime、RunPolicy、state
+│   ├── runner.py                # 统一 Agent run 外围生命周期
 │   ├── loop.py                  # query_loop 工作循环
 │   └── agent.py                 # CLI Agent 顶层入口
+├── team/                        # Agent Teams 协作平面
 ├── builtin/                     # 内置记忆、提示词、产物和恢复逻辑
 ├── cli/                         # CLI 交互和事件渲染
 ├── event/                       # Event、EventSink 和 Interaction Protocol
@@ -83,6 +91,7 @@ lite_harness/
 - [Agent](doc/architecture/agent.md)：Agent 顶层入口、输入循环和输出处理。
 - [Agent Loop](doc/architecture/agent_loop.md)：query loop、工具调用和压缩生命周期。
 - [Runtime](doc/architecture/runtime.md)：Runtime、RunPolicy、state 和组件组装。
+- [Agent Teams](doc/architecture/agent_teams.md)：lead、teammate、mailbox 和共享任务协作。
 - [Event](doc/architecture/event.md)：事件类型、EventSink 和事件顺序。
 - [Hook](doc/architecture/hook.md)：HookManager、权限检查和 Hook 生命周期。
 - [Interaction](doc/architecture/interaction.md)：用户输入、审批请求和交互实现。

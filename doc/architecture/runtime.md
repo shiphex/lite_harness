@@ -19,7 +19,7 @@ query loop 不直接创建模型、工具、Hook 或交互对象，而是从 Run
 | `session_id` | 整个会话的 ID。一个会话可以包含多次用户输入。 |
 | `agent_name` | Agent 的显示名称。 |
 | `agent_id` | 当前 Agent Runtime 的 ID，由 `agent_name` 和随机字符串组成。 |
-| `state.turn_count` | 当前 query loop 的轮次。每次调用 `query_loop()` 前，顶层入口会重新置零。 |
+| `state.turn_count` | 当前 query loop 的轮次。每次 `run_turn()` 进入 query loop 前会重新置零。 |
 
 当前 Runtime 没有 `run_id` 字段。一次用户请求由 `query_loop()` 的一次调用表示；事件本身还有独立的 `event_id`。
 
@@ -137,7 +137,8 @@ runtime = RuntimeFactory.create(
 
 # 8. 一次运行的关系
 
-CLI 顶层入口负责创建 Runtime 和接收用户输入；`query_loop()` 负责模型调用与工具编排；具体组件负责各自的副作用或观察行为。
+CLI 顶层入口负责创建 Runtime 和接收用户输入；`run_turn()` 负责一次输入的外围生命周期；
+`query_loop()` 负责模型调用与工具编排；具体组件负责各自的副作用或观察行为。
 
 ```mermaid
 sequenceDiagram
@@ -151,8 +152,9 @@ sequenceDiagram
     participant User as Interaction
 
     Client->>Runtime: RuntimeFactory.create()
-    Client->>Runtime: 获取输入、运行 UserPromptSubmit Hook
-    Client->>Loop: query_loop(runtime)
+    Client->>Runtime: 获取输入并调用 run_turn(runtime, input)
+    Runtime->>Runtime: UserPromptSubmit Hook / append / begin_run
+    Runtime->>Loop: query_loop(runtime)
     Loop->>Sink: run.started / turn.started
     Loop->>Model: complete(ModelRequest)
     Model-->>Loop: ModelResponse

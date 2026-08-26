@@ -32,6 +32,11 @@ Event 和 Hook 的区别是：
 | `approval.resolved` | 审批已经得到结果 | `Interaction.request_approval()` 返回后。 |
 | `compact.started` | 压缩开始 | 自动压缩、反应式压缩或 `compact` 工具。 |
 | `compact.completed` | 压缩完成 | 对应压缩操作结束后。 |
+| `team.member.spawned` | teammate 已成功创建 | `TeamCoordinator.spawn()` 启动 Worker 后。 |
+| `team.member.status_changed` | teammate 状态变化 | Worker 生命周期回调更新 roster 时。 |
+| `team.member.stopped` | teammate 已正常停止 | Worker 进入 `stopped` 终态时。 |
+| `team.message.sent` | team 业务消息已入队 | Coordinator 或 Worker 完成 mailbox 投递后。 |
+| `team.message.received` | Agent 已取出 team 消息 | Worker 或工具读取 mailbox 时。 |
 | `error` | 已处理的错误 | 反应式压缩后仍无法继续时。 |
 
 `EventType` 的值使用点号命名，例如 `EventType.TOOL_COMPLETED == "tool.completed"`。
@@ -99,13 +104,14 @@ class EventSink(Protocol):
         ...
 ```
 
-项目提供四种实现：
+项目提供四种通用实现，CLI 另提供终端渲染实现：
 
 | Sink | 用途 |
 | ---- | ---- |
 | `NullEventSink` | 默认实现，忽略事件。适合不需要输出事件的 Runtime。 |
 | `FanoutEventSink` | 按注册顺序把同一个事件发送给多个 Sink。 |
 | `MemoryEventSink` | 把事件保存到 `events` 列表，适合测试和调试。 |
+| `SynchronizedEventSink` | 用锁保护底层 Sink，供 lead 和多个 teammate 并发共享。 |
 | `CliEventSink` | CLI 模块提供的实现，把部分事件渲染成终端输出。 |
 
 例如同时输出 CLI 并保存测试记录：

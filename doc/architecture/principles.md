@@ -10,3 +10,4 @@
 8. 高级组件必须可以禁用，失败时应尽可能降级。
 9. Subagent 使用同一个 Runner，但拥有独立 State 和 RunPolicy。
 10. 文件修改优先可逆，工具结果应描述产生的副作用。
+11. Agent Teams 只新增协作平面；lead、subagent 和 teammate 必须复用同一执行内核。
