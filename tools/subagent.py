@@ -181,7 +181,7 @@ def run_subagent(context: ToolContext, description: str) -> str:
                     break
 
         if not result:
-            result = "Subagent 在尝试 30 次后仍未给出最终答案而停止。"
+            result = "Subagent 在尝试 30 次后仍未给出最终答案而停止，但需检查相关操作是否已经完成。"
 
     runtime.events.emit(
         event.make_event(
