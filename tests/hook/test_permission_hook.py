@@ -46,3 +46,17 @@ def test_permission_hook_requires_spawn_teammate_approval():
     assert result.action == HookAction.ASK
     assert result.approval_required is True
     assert "teammate" in result.message
+
+
+def test_file_permission_uses_runtime_workspace(tmp_path):
+    context = SimpleNamespace(workspace=tmp_path / "teammate")
+    context.workspace.mkdir()
+    block = SimpleNamespace(
+        name="write_file",
+        input={"path": str(tmp_path / "outside.txt"), "content": "x"},
+    )
+
+    result = permission_hook(context, block)
+
+    assert result.action == HookAction.ASK
+    assert "超出工作目录" in result.message

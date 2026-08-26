@@ -14,6 +14,7 @@ import signal
 import time
 import atexit
 import config
+from pathlib import Path
 from .tool_class import ToolContext
 
 
@@ -155,7 +156,10 @@ signal.signal(signal.SIGTERM, _handle_termination_signal)
 """
 
 
-def _run_bash_process(command: str) -> tuple[str, int | None]:
+def _run_bash_process(
+    command: str,
+    cwd: Path | str | None = None,
+) -> tuple[str, int | None]:
     """ 执行平台 Shell 命令。
 
     该函数用于执行 Bash 或 PowerShell 命令。
@@ -172,7 +176,7 @@ def _run_bash_process(command: str) -> tuple[str, int | None]:
         process = subprocess.Popen(
             _build_shell_command(command),
             shell=False,
-            cwd = os.getcwd(),
+            cwd = str(cwd or Path.cwd()),
             stdout = subprocess.PIPE,
             stderr = subprocess.PIPE,
             text=True,
@@ -234,7 +238,12 @@ def run_bash(context: ToolContext, command: str, run_in_background: bool = False
     Returns:
         命令执行结果。
     """
-    return _format_bash_result(*_run_bash_process(command))
+    workspace = getattr(
+        getattr(getattr(context, "runtime", None), "paths", None),
+        "workspace",
+        None,
+    )
+    return _format_bash_result(*_run_bash_process(command, workspace))
 
 
 class BackgroundManager:
@@ -255,7 +264,7 @@ class BackgroundManager:
         self._counter = 0
         self._lock = threading.Lock()
 
-    def start(self, block) -> str:
+    def start(self, block, workspace: Path | str | None = None) -> str:
         """ 启动后台任务。
         
         启动后台任务，用于执行 Bash 命令或 PowerShell 命令。
@@ -283,7 +292,7 @@ class BackgroundManager:
 
         thread = threading.Thread(
             target = self._run,
-            args = (task_id, command),
+            args = (task_id, command, workspace),
             daemon = True,  # 开启守护线程，主线程退出时自动退出。
         )
         try:
@@ -295,7 +304,12 @@ class BackgroundManager:
         # print(f"  [background] started {task_id}: {command[:60]}")
         return task_id
 
-    def _run(self, task_id: str, command: str):
+    def _run(
+        self,
+        task_id: str,
+        command: str,
+        workspace: Path | str | None = None,
+    ):
         """ 执行后台任务。
 
         执行后台任务，用于执行 Bash 命令或 PowerShell 命令。
@@ -306,7 +320,11 @@ class BackgroundManager:
             command: 要执行的命令。
         """
         try:
-            output, exit_code = _run_bash_process(command)
+            if workspace is None:
+                # Preserve the small direct-call API used by existing callers.
+                output, exit_code = _run_bash_process(command)
+            else:
+                output, exit_code = _run_bash_process(command, workspace)
             result = _format_bash_result(output, exit_code)
             status = "completed" if exit_code == 0 else "failed"
         except Exception as error:
@@ -376,8 +394,13 @@ def should_run_background(tool_name: str, tool_input: dict) -> bool:
     )
 
 
-def start_background_task(block) -> str:
-    return BACKGROUND.start(block)
+def start_background_task(
+    block,
+    workspace: Path | str | None = None,
+) -> str:
+    """启动后台命令，并固定它的 Runtime workspace。"""
+
+    return BACKGROUND.start(block, workspace=workspace)
 
 
 def collect_background_results() -> list[str]:
@@ -437,9 +460,14 @@ def run_powershell(context: ToolContext, command: str) -> str:
     
     # 通过子进程执行命令
     try:
+        workspace = getattr(
+            getattr(getattr(context, "runtime", None), "paths", None),
+            "workspace",
+            None,
+        )
         r = subprocess.run(
                             _build_shell_command(command),
-                            cwd=os.getcwd(),
+                            cwd=str(workspace or Path.cwd()),
                             capture_output = True, 
                             encoding='utf-8', errors='ignore',
                             text = True, timeout = 120)

@@ -10,11 +10,26 @@
         hook.trigger_hooks("PreToolUse", block, output)
 """
 
+from pathlib import Path
+
 import config
 
 
 # 获取项目根目录
 WORKDIR = config.Config().get_path_config("project_path")
+
+
+def _workspace(ctx) -> Path:
+    """解析当前 Hook 对应 Runtime 的 workspace。"""
+
+    workspace = getattr(ctx, "workspace", None)
+    return Path(workspace).resolve() if workspace is not None else Path(WORKDIR).resolve()
+
+
+def _outside_workspace(ctx, args: dict) -> bool:
+    workspace = _workspace(ctx)
+    path = (workspace / args.get("path", "")).resolve()
+    return not path.is_relative_to(workspace)
 
 # Gate 1: 检测命令是否在拒绝列表中
 # 拒绝列表
@@ -72,11 +87,14 @@ DANG_LIST_POWERSHELL = [
 
 # 权限规则
 PERMISSION_RULES = [
-    {"tools": ["read_file", "write_file"],
-     "check": lambda args: not (WORKDIR / args.get("path", "")).resolve().is_relative_to(WORKDIR),
+    {"tools": ["read_file", "write_file", "edit_file"],
+     "check": _outside_workspace,
      "message": "尝试访问的文件路径超出工作目录范围。"},
     {"tools": ["powershell"],
-     "check": lambda args: any(kw in args.get("command", "") for kw in DANG_LIST_LINUX + DANG_LIST_POWERSHELL),
+     "check": lambda ctx, args: any(
+         kw in args.get("command", "")
+         for kw in DANG_LIST_LINUX + DANG_LIST_POWERSHELL
+     ),
      "message": "潜在破坏性指令"},
 ]
 
@@ -115,7 +133,7 @@ def permission_hook(ctx, block):
 
     # 规则匹配
     for rule in PERMISSION_RULES:
-        if block.name in rule["tools"] and rule["check"](block.input):
+        if block.name in rule["tools"] and rule["check"](ctx, block.input):
             reason = rule["message"]
 
             return HookResult(

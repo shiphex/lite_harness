@@ -336,7 +336,10 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
 
         if tools.should_run_background(block.name, block.input):
             try:
-                task_id = tools.start_background_task(block)
+                task_id = tools.start_background_task(
+                    block,
+                    workspace=runtime.paths.workspace,
+                )
                 output = (
                     f"[后台任务 {task_id} 已启动] "
                     "结果将在稍后收集。"
