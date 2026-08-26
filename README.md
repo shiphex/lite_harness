@@ -53,10 +53,12 @@ CLI → RuntimeFactory → query_loop → Model / Hook / Tool → EventSink
 6. 没有新的工具调用时运行 `Stop` Hook，并返回本轮状态。
 
 Agent Teams 在这条主线之上增加轻量协作平面。lead 可以创建最多 3 名默认只读的持久
-teammate；成员共享 team-scoped task 列表和进程内 mailbox，但各自拥有独立 history。
+teammate，也可以按需创建拥有独立 Git worktree 的 writer；成员共享 team-scoped task
+列表和进程内 mailbox，但各自拥有独立 history。
 lead、subagent 与 teammate 均通过 `run_turn() → query_loop()` 执行，不存在第二套
-Agent Loop。当前 MVP 提供 `spawn_teammate`、`send_message`、`read_messages`、
-`list_team` 和 `shutdown_teammate`，暂不包含自动认领、等待协议或并行写代码。
+Agent Loop。当前 MVP 提供 `spawn_teammate(profile=researcher|writer)`、
+`send_message`、`read_messages`、`list_team` 和 `shutdown_teammate`，暂不包含自动认领、
+等待协议或自动 merge。
 
 ## 3. 项目结构
 

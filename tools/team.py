@@ -63,6 +63,11 @@ TEAM_LEAD_TOOLS = [
                 "name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"},
                 "role": {"type": "string"},
                 "prompt": {"type": "string"},
+                "profile": {
+                    "type": "string",
+                    "enum": ["researcher", "writer"],
+                    "default": "researcher",
+                },
             },
             "required": ["name", "role", "prompt"],
             "additionalProperties": False,
@@ -153,6 +158,7 @@ def bind_team_handlers(
         name: str,
         role: str,
         prompt: str,
+        profile: str = "researcher",
     ) -> str:
         """创建并启动一个持久 teammate。"""
 
@@ -162,6 +168,7 @@ def bind_team_handlers(
                 name=name,
                 role=role,
                 prompt=prompt,
+                profile=profile,
             )
         except (TeamError, KeyError) as error:
             return _team_error_result(error)

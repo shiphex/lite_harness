@@ -21,6 +21,13 @@ class MemberStatus(StrEnum):
     FAILED = "failed"
 
 
+class TeammateProfile(StrEnum):
+    """teammate 的能力与 workspace 隔离级别。"""
+
+    RESEARCHER = "researcher"
+    WRITER = "writer"
+
+
 @dataclass(slots=True, frozen=True)
 class TeamMessage:
     """Agent Team 中传递的一条不可变消息。
@@ -60,5 +67,8 @@ class TeamMember:
     name: str
     role: str
     agent_id: str
+    profile: TeammateProfile = TeammateProfile.RESEARCHER
     status: MemberStatus = MemberStatus.STARTING
     current_task: str | None = None
+    workspace: str | None = None
+    branch: str | None = None

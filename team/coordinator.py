@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from pathlib import Path
 import re
+import inspect
 from threading import RLock
 from time import monotonic
 from typing import TYPE_CHECKING, Callable
@@ -18,8 +19,9 @@ import event
 from tools.task_system import TaskStore
 
 from .bus import MessageBus
-from .contract import MemberStatus, TeamMember, TeamMessage
+from .contract import MemberStatus, TeamMember, TeamMessage, TeammateProfile
 from .worker import TeammateWorker
+from .worktree import WorktreeHandle, WorktreeManager
 
 
 if TYPE_CHECKING:
@@ -71,8 +73,8 @@ class TeamCoordinator:
             raise ValueError("max_members 必须是正整数")
 
         self.team_id = team_id
-        self.workspace = workspace
-        self.team_dir = workspace / ".agents" / "teams" / team_id
+        self.workspace = Path(workspace).resolve()
+        self.team_dir = self.workspace / ".agents" / "teams" / team_id
         # Team session 中的每个 owner 同时只能推进一个 active task；普通
         # TaskStore 不配置这一策略，因而保持原有的通用任务语义。
         self.tasks = TaskStore(
@@ -81,6 +83,11 @@ class TeamCoordinator:
         )
         self.runtime_factory = runtime_factory
         self.max_members = max_members
+        self.worktrees = WorktreeManager(
+            repo_root=self.workspace,
+            team_id=team_id,
+        )
+        self.member_worktrees: dict[str, WorktreeHandle] = {}
 
         self.bus = MessageBus()
         self.bus.register("lead")
@@ -116,6 +123,7 @@ class TeamCoordinator:
         name: str,
         role: str,
         prompt: str,
+        profile: TeammateProfile = TeammateProfile.RESEARCHER,
     ) -> TeamMember:
         """创建并启动一个持久 teammate。
 
@@ -127,6 +135,7 @@ class TeamCoordinator:
             name: team 内唯一的 teammate 名称。
             role: teammate 的职责说明。
             prompt: 首轮 assignment 内容。
+            profile: teammate capability profile；默认只读 researcher。
 
         Returns:
             TeamMember: 已登记的 teammate 快照。
@@ -138,6 +147,12 @@ class TeamCoordinator:
 
         self._assert_lead(parent_runtime)
         self._validate_member_input(name, role, prompt)
+        try:
+            profile = TeammateProfile(profile)
+        except ValueError as error:
+            raise TeamError(f"未知 teammate profile: {profile!r}") from error
+
+        worktree: WorktreeHandle | None = None
 
         with self._lock:
             # 终态成员保留在 roster 中，因此直接检查 roster 即可保证名称不复用。
@@ -148,11 +163,15 @@ class TeamCoordinator:
 
             self.bus.register(name)
             try:
-                runtime = self.runtime_factory(
-                    parent_runtime,
-                    self,
-                    name,
-                    role.strip(),
+                if profile == TeammateProfile.WRITER:
+                    worktree = self.worktrees.create(member=name, base_ref="HEAD")
+
+                runtime = self._create_runtime(
+                    parent_runtime=parent_runtime,
+                    name=name,
+                    role=role.strip(),
+                    profile=profile,
+                    workspace=worktree.path if worktree is not None else None,
                 )
                 if runtime.session_id != parent_runtime.session_id:
                     raise TeamError("teammate Runtime 必须属于当前 team session")
@@ -167,6 +186,13 @@ class TeamCoordinator:
                     name=name,
                     role=role.strip(),
                     agent_id=runtime.agent_id,
+                    profile=profile,
+                    workspace=(
+                        str(worktree.path)
+                        if worktree is not None
+                        else None
+                    ),
+                    branch=worktree.branch if worktree is not None else None,
                 )
                 worker = TeammateWorker(
                     name=name,
@@ -176,11 +202,16 @@ class TeamCoordinator:
                 )
                 self.members[name] = member
                 self.workers[name] = worker
+                if worktree is not None:
+                    self.member_worktrees[name] = worktree
             except Exception:
                 # Runtime factory 失败时成员尚未对外可见，清除半成品 roster 与 mailbox。
                 self.members.pop(name, None)
                 self.workers.pop(name, None)
+                self.member_worktrees.pop(name, None)
                 self.bus.unregister(name)
+                if worktree is not None:
+                    self.worktrees.remove(worktree, discard=True)
                 raise
 
         self._emit(
@@ -188,6 +219,8 @@ class TeamCoordinator:
             event.EventType.TEAM_MEMBER_SPAWNED,
             member=name,
             role=role.strip(),
+            profile=profile,
+            branch=worktree.branch if worktree is not None else None,
         )
         try:
             worker.start(prompt)
@@ -196,6 +229,47 @@ class TeamCoordinator:
             self._set_status(name, MemberStatus.FAILED)
             raise
         return replace(member)
+
+    def _create_runtime(
+        self,
+        *,
+        parent_runtime: "AgentRuntime",
+        name: str,
+        role: str,
+        profile: TeammateProfile,
+        workspace: Path | None,
+    ):
+        """调用新 runtime factory，并兼容旧版四参数测试工厂。"""
+
+        kwargs = {
+            "profile": profile,
+            "workspace": workspace,
+        }
+        try:
+            signature = inspect.signature(self.runtime_factory)
+        except (TypeError, ValueError):
+            signature = None
+
+        if signature is not None:
+            parameters = signature.parameters.values()
+            accepts_kwargs = any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters
+            )
+            if not accepts_kwargs:
+                kwargs = {
+                    key: value
+                    for key, value in kwargs.items()
+                    if key in signature.parameters
+                }
+
+        return self.runtime_factory(
+            parent_runtime,
+            self,
+            name,
+            role,
+            **kwargs,
+        )
 
     def send(
         self,

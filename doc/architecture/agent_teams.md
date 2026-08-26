@@ -11,6 +11,7 @@ MasterSession
 └── TeamCoordinator               │
     ├── MessageBus                │
     ├── team-scoped TaskStore     ├── run_turn() → query_loop()
+    ├── WorktreeManager           │
     └── TeammateWorker            │
         └── teammate AgentRuntime ┘
 ```
@@ -22,7 +23,7 @@ MasterSession
 - `TeammateWorker` 只把初始 prompt 和 mailbox 消息转换成 `run_turn()`。
 
 lead、subagent 和 teammate 始终复用同一执行内核。`team/` 按 contract、bus、worker、
-coordinator 和 factory 分层，避免把协作协议塞进 Runtime 或 LLM 工具适配器。
+coordinator、factory 和 worktree 分层，避免把协作协议塞进 Runtime 或 LLM 工具适配器。
 
 ## 2. Identity 与 Context
 
@@ -41,6 +42,11 @@ bob.agent_id   = bob-zzzz
 
 teammate 使用空 history 创建，不继承 lead 对话。Worker 在 follow-up 之间复用同一个
 Runtime，因此成员自己的分析上下文可以持续保留。
+
+Runtime 同时区分执行工作区和状态根目录：`paths.workspace` 决定文件工具、shell 和
+权限 Hook 的作用范围，`paths.state_root` 决定 `.agents/runs`、memory 和 artifact
+的落盘位置。普通 Runtime 默认两者相同；writer teammate 使用独立 Git worktree
+作为 workspace，但与 lead 共享 team session 的 state root。
 
 teammate name 必须符合 `^[A-Za-z][A-Za-z0-9_-]{0,31}$`。终态成员仍保留在 roster，
 所以同一 team 生命周期内不能复用名称。默认最多 3 名活跃 teammate，可通过
@@ -89,13 +95,13 @@ lead 和 teammate 共用：
 
 仅 lead 拥有：
 
-- `spawn_teammate(name, role, prompt)`
+- `spawn_teammate(name, role, prompt, profile)`，其中 `profile` 为 `researcher` 或 `writer`
 - `shutdown_teammate(name)`
 
 `spawn_teammate` 的 PreToolUse Hook 始终返回 `ASK`。teammate 使用
 `NonInteractiveInteraction`，不能通过非交互 Runtime 绕过审批。
 
-第一版 teammate 仅可使用：
+`researcher` teammate 仅可使用：
 
 - 项目读取：`read_file、glob、load_skill`。
 - 共享任务：`list_tasks、get_task、claim_task、complete_task`。
@@ -103,6 +109,12 @@ lead 和 teammate 共用：
 
 teammate 不提供 shell、文件写入、任务创建、依赖更新、subagent 或 spawn。该边界由
 Runtime 的工具定义和 handler allowlist 同时限制，不只依赖 prompt。
+
+`writer` teammate 获得 `bash、write_file、edit_file`，并由 Coordinator 在主仓库 sibling
+目录创建独立、锁定的 linked worktree 和 `agent/{team_id}/{member}` 分支。文件工具、
+普通/后台 shell 及路径权限检查均使用 writer Runtime 的 workspace，因此不会回退到进程级
+项目目录。writer 的 worktree 绑定成员而不是 task；关闭 Worker 不会自动 merge、删除
+worktree 或丢弃未提交修改，合并与清理由 lead 通过明确操作决定。
 
 ## 6. 状态、事件与关闭
 
@@ -130,8 +142,9 @@ Runtime metadata。
 - Team Protocol：request/ack graceful shutdown、plan approval、自动 result notification
   或 lead 唤醒、`wait_teammate(s)`。
 - Autonomous Team：idle task scan、自动认领和自组织循环。
-- Worktree Isolation：并行写代码、task-bound worktree 和独立分支。
+- Worktree Isolation 的后续能力：task-bound workspace、自动 merge、远程 transport 和
+  操作系统级 sandbox。
 - team shared/private memory、持久 roster、持久 mailbox 和远程 transport。
 
-基础协作式 shutdown、结果投递和 task 手动认领仍属于 MVP。第一版定位为项目文件只读
-的研究、分析和评审。
+基础协作式 shutdown、结果投递、task 手动认领以及 researcher/writer worktree 隔离仍
+属于 MVP；第一版不包含自动认领、自组织循环或自动集成分支。
