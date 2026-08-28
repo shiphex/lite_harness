@@ -136,8 +136,9 @@ COMPACT_COMPLETED
 - 不调用 `ToolExecutor`。
 - 不触发 `PostToolUse`。
 - 调用 `tools.compact_history()`。
-- 返回 `results, "compact"`。
-- `query_loop()` 收到 `status == "compact"` 后直接进入下一轮。
+- 压缩早期 history，但保留当前 assistant tool message，供完整 batch 结果配对。
+- 将当前 batch 指令设为 `RunDirective.RESTART`，并继续为后续 tool block 生成结果。
+- `query_loop()` 保存完整 batch 后收到 `RESTART`，再进入下一轮。
 
 自动压缩、反应式压缩和 `compact` 工具都使用 `COMPACT_STARTED` 与 `COMPACT_COMPLETED`，但触发函数不同：
 
@@ -152,25 +153,32 @@ COMPACT_COMPLETED
 `compact_pipeline(runtime)` 负责每轮模型请求前的历史压缩：
 
 1. 保存压缩前的消息快照 `pre_compress`。
-2. 发送 `COMPACT_STARTED`。
-3. 执行 `tools.tool_result_budget()`。
-4. 执行 `tools.snip_compact()`。
-5. 执行 `tools.micro_compact()`。
-6. 如果估算大小超过上下文限制，执行 `tools.compact_history()`。
-7. 发送 `COMPACT_COMPLETED`。
+2. 执行 `tools.tool_result_budget()`。
+3. 执行 `tools.snip_compact()`。
+4. 执行 `tools.micro_compact()`。
+5. 如果估算大小没有超过上下文限制，直接返回。
+6. 仅在需要执行 `tools.compact_history()` 时发送 `COMPACT_STARTED`。
+7. 历史压缩完成后发送 `COMPACT_COMPLETED`。
 8. 返回压缩前快照和压缩后的消息。
 
 压缩前快照用于在本轮结束时提取记忆，压缩后的消息用于构建模型请求。
 
 ## 7. `execute_tool()`
 
-`execute_tool(response, runtime)` 遍历 `ModelResponse.content` 中的工具块，返回：
+`execute_tool(response, runtime)` 遍历 `ModelResponse.content` 中的全部工具块，返回：
 
 ```python
-results, status = execute_tool(response, runtime)
+ToolBatchResult(
+    results=[...],
+    directive=RunDirective.CONTINUE,
+    suspend=None,
+)
 ```
 
-普通工具调用返回 `status == "complete"`；`compact` 控制操作返回 `status == "compact"`。
+旧式字符串 handler 会被规范化为 `ToolOutcome`。批次控制指令优先级为
+`SUSPEND > RESTART > CONTINUE`；`compact` 声明 `RESTART`，异步等待工具可以声明
+`SUSPEND`。同一批次最多允许一个挂起请求，并且无论控制指令出现在哪个位置，都必须
+执行完整批次，保证每个 `tool_use` 都有对应 `tool_result`。
 
 普通工具的处理顺序是：
 
@@ -226,10 +234,12 @@ flowchart TD
     M -->|no| O[append assistant message]
     O --> P{stop reason tool_use?}
     P -->|yes| Q[execute_tool]
-    Q --> R{status is compact?}
-    R -->|yes| H
-    R -->|no| S[append tool results]
-    S --> H
+    Q --> R[append complete tool batch]
+    R --> S{batch directive}
+    S -->|RESTART| H
+    S -->|CONTINUE| H
+    S -->|SUSPEND| Z5[emit RUN_SUSPENDED]
+    Z5 --> Z6([return suspended])
     P -->|no| T[extract and consolidate memory]
     T --> U[run STOP hook]
     U --> V{hook blocked?}
@@ -244,7 +254,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     A([start]) --> B{more content blocks?}
-    B -->|no| Y([return complete status])
+    B -->|no| Y([return ToolBatchResult])
     B -->|yes| C{block is tool_use?}
     C -->|no| B
     C -->|yes| D[emit TOOL_REQUESTED]
@@ -253,7 +263,7 @@ flowchart TD
     F --> G[run compact_history]
     G --> H[append compact result]
     H --> I[emit COMPACT_COMPLETED]
-    I --> J([return compact status])
+    I --> B
     E -->|no| K[run PRE_TOOL_USE]
     K --> L{hook action}
     L -->|BLOCK| M[emit TOOL_BLOCKED]
@@ -280,15 +290,15 @@ flowchart TD
 ```mermaid
 flowchart TD
     A([start]) --> B[save pre_compress snapshot]
-    B --> C[emit COMPACT_STARTED]
-    C --> D[run tool_result_budget]
+    B --> D[run tool_result_budget]
     D --> E[run snip_compact]
     E --> F[run micro_compact]
     F --> G{size over context limit?}
-    G -->|yes| H[run compact_history]
-    G -->|no| I[emit COMPACT_COMPLETED]
-    H --> I
-    I --> J([return snapshot and messages])
+    G -->|yes| H[emit COMPACT_STARTED]
+    H --> I[run compact_history]
+    I --> J[emit COMPACT_COMPLETED]
+    G -->|no| K([return snapshot and messages])
+    J --> K
 ```
 
 ## 12. 目标形态：七个 Continue 站点

@@ -22,8 +22,10 @@ TeamCoordinator
 
 lead 使用 `spawn_teammate` 创建成员，成员通过 task 工具显式认领和完成共享任务。
 lead 与 teammate、teammate 与 teammate 都可使用 `send_message` 通信；每轮 Worker 的
-最终结果统一进入 lead mailbox，并由 lead 使用 `read_messages` 读取。
+最终结果统一进入 lead mailbox。lead 使用 `wait_teammates` 声明挂起，由外层
+`SessionDriver` 阻塞等待 Queue，并在收齐结果或超时后注入一次 team notification 恢复
+推理；`read_messages` 仅用于非阻塞诊断。
 
-当前 MVP 不实现 wait 协议、自动认领、自组织循环、worktree 或持久 mailbox。详细边界
-见 [Agent Teams 架构文档](../architecture/agent_teams.md)。
+当前 MVP 不实现 causal identity、自动认领、自组织循环或持久 mailbox。详细边界见
+[Agent Teams 架构文档](../architecture/agent_teams.md)。
 

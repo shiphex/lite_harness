@@ -21,6 +21,8 @@ Event 和 Hook 的区别是：
 | ---- | ---- | ---- |
 | `system.message` | 系统提示信息 | `master_agent()` 启动时。 |
 | `run.started` | 一次 `query_loop()` 开始 | `query_loop()` 入口。 |
+| `run.suspended` | 当前 run 已保存状态并挂起 | `query_loop()` 收到通用 `SUSPEND` 指令时。 |
+| `run.resumed` | 外部等待条件已满足，准备恢复 run | `SessionDriver` 注入 notification 前。 |
 | `run.completed` | 一次 query loop 结束 | 正常完成、达到轮次限制或上下文恢复失败时。 |
 | `turn.started` | 新一轮 query loop 开始 | `state.turn_count` 增加后。 |
 | `assistant.message` | Assistant 文本消息 | `master_agent()` 处理完 query loop 返回的历史消息后。 |
@@ -30,7 +32,7 @@ Event 和 Hook 的区别是：
 | `tool.blocked` | 工具调用被阻止 | Hook 拒绝、审批拒绝或 Agent 不允许审批时。 |
 | `approval.requested` | 请求用户审批 | PreToolUse 返回 `ASK` 且允许询问用户时。 |
 | `approval.resolved` | 审批已经得到结果 | `Interaction.request_approval()` 返回后。 |
-| `compact.started` | 压缩开始 | 自动压缩、反应式压缩或 `compact` 工具。 |
+| `compact.started` | 压缩开始 | 实际执行重型自动压缩、反应式压缩或 `compact` 工具时。 |
 | `compact.completed` | 压缩完成 | 对应压缩操作结束后。 |
 | `team.member.spawned` | teammate 已成功创建 | `TeamCoordinator.spawn()` 启动 Worker 后。 |
 | `team.member.status_changed` | teammate 状态变化 | Worker 生命周期回调更新 roster 时。 |
@@ -138,11 +140,17 @@ tool.requested
 一次没有工具调用的正常回答通常是：
 
 ```text
-run.started
-→ turn.started
-→ compact.started / compact.completed
-→ run.completed
+run.started → turn.started → run.completed
 → assistant.message   # 由顶层 Agent 入口处理输出时发送
+```
+
+轻量的工具结果预算、裁剪和占位替换不会发布 compact 事件；只有实际进入历史摘要压缩
+时才会出现 `compact.started → compact.completed`。一次 Team 等待则表现为：
+
+```text
+run.started → run.suspended
+→ MessageBus / SessionDriver wait
+→ run.resumed → run.started → run.completed
 ```
 
 `approval.requested` 和 `approval.resolved` 位于 `tool.requested` 与最终的 `tool.started` 或 `tool.blocked` 之间。审批流程见 [interaction.md](./interaction.md)。

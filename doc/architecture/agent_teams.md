@@ -6,18 +6,19 @@ Agent Teams 让一个 lead 与多个持久 teammate 在同一 session 内协作�
 ## 1. 架构边界
 
 ```text
-MasterSession
-├── lead AgentRuntime ─────────────┐
-└── TeamCoordinator               │
-    ├── MessageBus                │
-    ├── team-scoped TaskStore     ├── run_turn() → query_loop()
-    ├── WorktreeManager           │
-    └── TeammateWorker            │
-        └── teammate AgentRuntime ┘
+CLI ──► SessionDriver ──► lead AgentRuntime ──► run_turn() ──► query_loop()
+              │
+              └── suspend/resume ──► TeamCoordinator
+                                      ├── MessageBus
+                                      ├── team-scoped TaskStore
+                                      ├── WorktreeManager
+                                      └── TeammateWorker
+                                          └── teammate AgentRuntime
 ```
 
 - `AgentRuntime` 管理单个 Agent 的策略、状态和运行组件。
 - `run_turn()` 管理输入 Hook、history 追加、run 状态重置和 `query_loop()` 调用。
+- `SessionDriver` 决定 lead Runtime 何时运行、挂起、等待和恢复，不参与模型推理。
 - `TeamCoordinator` 管理 roster、共享任务、消息路由和 Worker 生命周期。
 - `MessageBus` 为每个成员维护一条进程内 FIFO `Queue`。
 - `TeammateWorker` 只把初始 prompt 和 mailbox 消息转换成 `run_turn()`。
@@ -82,8 +83,20 @@ TaskStore 保持不限额的通用语义。
 每次 Worker `run_turn()` 完成后都会自动且仅一次向 lead 投递 `result`。因此
 `send_message` 仅用于显式的中间沟通，不应用来重复发送最终结果。
 
-`read_messages` 是非阻塞 drain：按 FIFO 顺序返回并清空当前 Agent 的 mailbox。
-mailbox 只传输消息，不直接操作 Runtime history，也不持久化到磁盘。
+`read_messages` 是非阻塞 drain：按 FIFO 顺序返回并清空当前 Agent 的 mailbox，仅用于
+主动检查和诊断，不是同步机制。mailbox 只传输消息，不直接操作 Runtime history，也不
+持久化到磁盘。
+
+lead 使用 `wait_teammates(members, timeout_seconds)` 声明等待指定成员的最终 result。
+该工具立即返回通用 `SUSPEND` 控制指令，本身不读取 Queue、不休眠也不循环查询模型。
+`query_loop()` 保存完整 tool batch 后退出，外层 `SessionDriver` 再通过
+`TeamCoordinator.wait_for_results()` 阻塞于 `MessageBus.receive()`。底层
+`Queue.get(timeout)` 会在无消息时挂起宿主线程。
+
+指定成员全部返回 result 或等待超时后，Driver 将本次收集到的消息和
+`completed、pending、timed_out` 包装为 `<team-notification>`，作为新的外部输入恢复
+lead。多个成员的结果因此只触发一次 lead 汇总推理；等待期间到达的其他消息也会一并
+交给 lead。
 
 ## 5. 工具与权限
 
@@ -95,8 +108,13 @@ lead 和 teammate 共用：
 
 仅 lead 拥有：
 
+- `wait_teammates(members, timeout_seconds=120)`
 - `spawn_teammate(name, role, prompt, profile)`，其中 `profile` 为 `researcher` 或 `writer`
 - `shutdown_teammate(name)`
+
+lead prompt 规定先完成全部 spawn，再调用一次 `wait_teammates`；禁止通过
+`read_messages、list_team、list_tasks` 循环查询进度。超时通知由 lead 决定继续等待、
+诊断失败或使用已有结果。
 
 `spawn_teammate` 的 PreToolUse Hook 始终返回 `ASK`。teammate 使用
 `NonInteractiveInteraction`，不能通过非交互 Runtime 绕过审批。
@@ -126,9 +144,14 @@ worktree 或丢弃未提交修改，合并与清理由 lead 通过明确操作�
 - `team.message.received`
 - `team.member.stopped`
 - `team.member.shutdown_timeout`
+- `run.suspended`
+- `run.resumed`
 
 lead 与 teammate 共享 `SynchronizedEventSink`，每个事件仍使用实际发送或接收消息的
 Runtime metadata。
+
+`MessageBus + SessionDriver` 属于控制平面，负责实际唤醒 Runtime；`EventSink` 属于观测
+平面，只记录和展示已经发生的事实，不能反向驱动 Runtime。
 
 `shutdown_teammate` 设置停止标记，并发送内部 shutdown 消息唤醒等待中的 Worker。它
 不会中断正在执行的 `run_turn()`；当前 run 返回后线程退出。`MasterSession.close()` 会
@@ -139,12 +162,13 @@ Runtime metadata。
 
 以下能力属于后续阶段，不纳入当前 MVP：
 
-- Team Protocol：request/ack graceful shutdown、plan approval、自动 result notification
-  或 lead 唤醒、`wait_teammate(s)`。
+- Team Protocol：request/ack graceful shutdown、plan approval 和 result causal identity。
 - Autonomous Team：idle task scan、自动认领和自组织循环。
 - Worktree Isolation 的后续能力：task-bound workspace、自动 merge、远程 transport 和
   操作系统级 sandbox。
 - team shared/private memory、持久 roster、持久 mailbox 和远程 transport。
 
-基础协作式 shutdown、结果投递、task 手动认领以及 researcher/writer worktree 隔离仍
-属于 MVP；第一版不包含自动认领、自组织循环或自动集成分支。
+当前等待仍以 teammate 名称匹配 result；持久 teammate 的后续 assignment 需要引入
+`task_id、parent_run_id、correlation_id`，再迁移到按 correlation identity 等待。基础
+协作式 shutdown、结果投递、事件驱动等待、task 手动认领以及 researcher/writer
+worktree 隔离属于当前 MVP。
