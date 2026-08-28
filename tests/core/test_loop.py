@@ -8,6 +8,7 @@ from api.contract import ModelResponse, TextPart, ToolCallPart
 from builtin.artifacts import ArtifactStore
 from builtin.memory import MemoryPolicy, MemoryMode
 from core import loop
+from core.control import RunDirective, SuspendRequest, ToolOutcome
 from core.runtime import AgentRuntime, RunPolicy, RuntimePaths, state
 from event import EventType, MemoryEventSink
 from event.interaction import ApprovalResponse
@@ -155,7 +156,10 @@ def test_query_loop_appends_canonical_final_response(monkeypatch, tmp_path):
     ]
 
 
-def test_compact_pipeline_emits_start_and_complete_events(monkeypatch, tmp_path):
+def test_compact_pipeline_skips_events_when_heavy_compact_is_not_needed(
+    monkeypatch,
+    tmp_path,
+):
     runtime = make_runtime(tmp_path)
     monkeypatch.setattr(
         loop.tools,
@@ -174,12 +178,40 @@ def test_compact_pipeline_emits_start_and_complete_events(monkeypatch, tmp_path)
         EventType.COMPACT_STARTED,
         EventType.COMPACT_COMPLETED,
     )
-    assert event_count(runtime.events.events, EventType.COMPACT_STARTED) == 1
+    assert event_count(runtime.events.events, EventType.COMPACT_STARTED) == 0
+    assert event_count(runtime.events.events, EventType.COMPACT_COMPLETED) == 0
+
+
+def test_compact_pipeline_emits_events_only_for_heavy_compact(monkeypatch, tmp_path):
+    runtime = make_runtime(tmp_path)
+    compact_calls = []
+    monkeypatch.setattr(
+        loop.tools,
+        "tool_result_budget",
+        lambda messages, artifacts: messages,
+    )
+    monkeypatch.setattr(loop.tools, "snip_compact", lambda messages: messages)
+    monkeypatch.setattr(loop.tools, "micro_compact", lambda messages: messages)
+    monkeypatch.setattr(loop.tools, "estimate_size", lambda messages: 50001)
+    monkeypatch.setattr(
+        loop.tools,
+        "compact_history",
+        lambda messages, artifacts: compact_calls.append(artifacts) or messages,
+    )
+
+    loop.compact_pipeline(runtime)
+
+    assert compact_calls == [runtime.artifacts]
+    assert_balanced(
+        runtime.events.events,
+        EventType.COMPACT_STARTED,
+        EventType.COMPACT_COMPLETED,
+    )
     assert events_of(runtime.events.events, EventType.COMPACT_STARTED)[0].data == {
-        "trigger": "auto start compact.",
+        "trigger": "auto",
     }
     assert events_of(runtime.events.events, EventType.COMPACT_COMPLETED)[0].data == {
-        "trigger": "auto complete compact.",
+        "trigger": "auto",
     }
 
 
@@ -307,15 +339,15 @@ def test_execute_tool_honors_hook_block_and_triggers_post_hook(monkeypatch, tmp_
 
     monkeypatch.setattr(runtime.hooks, "run", run)
 
-    results, status = loop.execute_tool(
+    batch = loop.execute_tool(
         ModelResponse(content=[block, allowed], stop_reason="tool_use"), runtime
     )
 
-    assert status == "complete"
+    assert batch.directive == RunDirective.CONTINUE
     assert executed == [("demo_tool", {"value": 2})]
     assert len(contexts) == 1
     assert contexts[0].runtime is runtime
-    assert results == [
+    assert batch.results == [
         {"type": "tool_result", "tool_use_id": "blocked", "content": "blocked by policy"},
         {"type": "tool_result", "tool_use_id": "allowed", "content": "ok"},
     ]
@@ -339,7 +371,7 @@ def test_normal_tool_does_not_emit_compact_events(tmp_path):
         lambda context, name, args: executed.append((name, args)) or "ok"
     )
 
-    results, status = loop.execute_tool(
+    batch = loop.execute_tool(
         ModelResponse(
             content=[ToolCallPart(id="normal-1", name="demo_tool", input={})],
             stop_reason="tool_use",
@@ -347,9 +379,9 @@ def test_normal_tool_does_not_emit_compact_events(tmp_path):
         runtime,
     )
 
-    assert status == "complete"
+    assert batch.directive == RunDirective.CONTINUE
     assert executed == [("demo_tool", {})]
-    assert results == [{
+    assert batch.results == [{
         "type": "tool_result",
         "tool_use_id": "normal-1",
         "content": "ok",
@@ -359,6 +391,125 @@ def test_normal_tool_does_not_emit_compact_events(tmp_path):
     assert event_count(runtime.events.events, EventType.TOOL_REQUESTED) == 1
     assert event_count(runtime.events.events, EventType.TOOL_STARTED) == 1
     assert event_count(runtime.events.events, EventType.TOOL_COMPLETED) == 1
+
+
+def test_execute_tool_finishes_batch_and_suspend_overrides_restart(
+    monkeypatch,
+    tmp_path,
+):
+    request = SuspendRequest(
+        kind="team.results",
+        payload={"members": ["alice"]},
+    )
+    runtime = make_runtime(
+        tmp_path,
+        tools_list=[
+            {"name": "wait"},
+            {"name": "compact"},
+            {"name": "demo_tool"},
+        ],
+        tool_handler={
+            "wait": lambda context: ToolOutcome(
+                content="waiting",
+                directive=RunDirective.SUSPEND,
+                suspend=request,
+            ),
+            "demo_tool": lambda context: "done",
+        },
+    )
+    monkeypatch.setattr(
+        loop.tools,
+        "compact_history",
+        lambda messages, artifacts: messages,
+    )
+    response = ModelResponse(
+        content=[
+            ToolCallPart(id="wait-1", name="wait", input={}),
+            ToolCallPart(id="compact-1", name="compact", input={}),
+            ToolCallPart(id="demo-1", name="demo_tool", input={}),
+        ],
+        stop_reason="tool_use",
+    )
+
+    batch = loop.execute_tool(response, runtime)
+
+    assert batch.directive == RunDirective.SUSPEND
+    assert batch.suspend is request
+    assert [result["tool_use_id"] for result in batch.results] == [
+        "wait-1",
+        "compact-1",
+        "demo-1",
+    ]
+
+
+def test_execute_tool_rejects_multiple_suspend_requests(tmp_path):
+    request = SuspendRequest(kind="first", payload={})
+    runtime = make_runtime(
+        tmp_path,
+        tools_list=[{"name": "wait"}],
+        tool_handler={
+            "wait": lambda context: ToolOutcome(
+                content="waiting",
+                directive=RunDirective.SUSPEND,
+                suspend=request,
+            ),
+        },
+    )
+    response = ModelResponse(
+        content=[
+            ToolCallPart(id="wait-1", name="wait", input={}),
+            ToolCallPart(id="wait-2", name="wait", input={}),
+        ],
+        stop_reason="tool_use",
+    )
+
+    with pytest.raises(RuntimeError, match="多个 suspend request"):
+        loop.execute_tool(response, runtime)
+
+
+def test_query_loop_returns_suspended_without_another_model_call(
+    monkeypatch,
+    tmp_path,
+):
+    requests = []
+    suspend_request = SuspendRequest(
+        kind="team.results",
+        payload={"members": ["alice"], "timeout_seconds": 120},
+    )
+
+    class Adapter:
+        def complete(self, request):
+            requests.append(request)
+            return ModelResponse(
+                content=[ToolCallPart(id="wait-1", name="wait", input={})],
+                stop_reason="tool_use",
+            )
+
+    runtime = make_runtime(
+        tmp_path,
+        tools_list=[{"name": "wait"}],
+        tool_handler={
+            "wait": lambda context: ToolOutcome(
+                content="waiting",
+                directive=RunDirective.SUSPEND,
+                suspend=suspend_request,
+            ),
+        },
+    )
+    patch_loop_dependencies(monkeypatch, runtime, Adapter())
+
+    result_state, status = loop.query_loop(runtime)
+
+    assert result_state is runtime.state
+    assert status == {"reason": "suspended", "request": suspend_request}
+    assert len(requests) == 1
+    assert runtime.state.messages[-1]["content"][0]["tool_use_id"] == "wait-1"
+    assert event_count(runtime.events.events, EventType.RUN_SUSPENDED) == 1
+    assert event_count(runtime.events.events, EventType.RUN_COMPLETED) == 0
+    assert events_of(runtime.events.events, EventType.RUN_SUSPENDED)[0].data == {
+        "kind": "team.results",
+        "payload": {"members": ["alice"], "timeout_seconds": 120},
+    }
 
 
 def test_execute_tool_denied_approval_does_not_execute_dangerous_command(tmp_path):
@@ -380,17 +531,17 @@ def test_execute_tool_denied_approval_does_not_execute_dangerous_command(tmp_pat
         input={"command": "Remove-Item test.py"},
     )
 
-    results, status = loop.execute_tool(
+    batch = loop.execute_tool(
         ModelResponse(content=[block], stop_reason="tool_use"), runtime
     )
 
-    assert status == "complete"
+    assert batch.directive == RunDirective.CONTINUE
     assert executed == []
     assert len(interaction.requests) == 1
     assert interaction.requests[0].tool_call_id == "remove-1"
     assert interaction.requests[0].tool_name == "powershell"
     assert interaction.requests[0].arguments == {"command": "Remove-Item test.py"}
-    assert results == [{
+    assert batch.results == [{
         "type": "tool_result",
         "tool_use_id": "remove-1",
         "content": "user cancelled",
@@ -445,7 +596,7 @@ def test_ask_without_user_permission_does_not_request_approval(
         ),
     )
 
-    results, status = loop.execute_tool(
+    batch = loop.execute_tool(
         ModelResponse(
             content=[ToolCallPart(id="ask-1", name="demo_tool", input={})],
             stop_reason="tool_use",
@@ -453,9 +604,9 @@ def test_ask_without_user_permission_does_not_request_approval(
         runtime,
     )
 
-    assert status == "complete"
+    assert batch.directive == RunDirective.CONTINUE
     assert interaction.requests == []
-    assert results == [{
+    assert batch.results == [{
         "type": "tool_result",
         "tool_use_id": "ask-1",
         "content": "当前 Agent 不允许请求用户审批",
@@ -484,14 +635,14 @@ def test_execute_tool_approved_dangerous_command_executes_once(tmp_path):
         input={"command": "Remove-Item test.py"},
     )
 
-    results, status = loop.execute_tool(
+    batch = loop.execute_tool(
         ModelResponse(content=[block], stop_reason="tool_use"), runtime
     )
 
-    assert status == "complete"
+    assert batch.directive == RunDirective.CONTINUE
     assert executed == ["Remove-Item test.py"]
     assert interaction.requests[0].reason
-    assert results == [{
+    assert batch.results == [{
         "type": "tool_result",
         "tool_use_id": "remove-2",
         "content": "simulated",
@@ -516,6 +667,7 @@ def test_execute_tool_approved_dangerous_command_executes_once(tmp_path):
 
 
 def test_query_loop_compact_uses_runtime_artifacts(monkeypatch, tmp_path):
+    requests = []
     responses = iter([
         ModelResponse(
             content=[ToolCallPart(id="compact-1", name="compact", input={})],
@@ -527,6 +679,7 @@ def test_query_loop_compact_uses_runtime_artifacts(monkeypatch, tmp_path):
 
     class Adapter:
         def complete(self, request):
+            requests.append(list(request.messages))
             return next(responses)
 
     runtime = make_runtime(tmp_path, tools_list=[{"name": "compact"}])
@@ -540,6 +693,25 @@ def test_query_loop_compact_uses_runtime_artifacts(monkeypatch, tmp_path):
     loop.query_loop(runtime)
 
     assert compact_artifacts == [runtime.artifacts]
+    assert requests[1][-2:] == [
+        {
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use",
+                "id": "compact-1",
+                "name": "compact",
+                "input": {},
+            }],
+        },
+        {
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": "compact-1",
+                "content": "[已压缩： 对话历史已生成摘要。]",
+            }],
+        },
+    ]
     assert_balanced(
         runtime.events.events,
         EventType.COMPACT_STARTED,

@@ -16,8 +16,8 @@ import builtin
 import tools
 import config
 import event
-from .runner import run_turn
 from .runtime import AgentRuntime, RunPolicy, state, RuntimeFactory
+from .session_driver import SessionDriver
 from builtin.memory import MemoryPolicy, MemoryMode
 from cli.event_sink import CliEventSink
 from cli.cli_interaction import CliInteraction
@@ -32,6 +32,25 @@ from tools.team import (
     TEAM_LEAD_TOOLS,
     bind_team_handlers,
 )
+
+
+BASE_MASTER_PROMPT = "你是一个编码助手"
+
+
+TEAM_LEAD_PROMPT = """
+你是 Agent Team 的 lead。
+
+Agent Team 协作规则：
+1. 适合独立并行执行的任务，应先创建共享 task。
+2. 无依赖任务可以分别交给多个 teammate。
+3. 先完成所有需要的 spawn，再等待结果。
+4. 等待 teammate 时使用 wait_teammates。
+5. wait_teammates 会挂起当前 run，直到收到对应结果；它不会轮询，也不会消耗等待期间的 LLM token。
+6. 禁止通过 read_messages、list_team、list_tasks 反复查询 teammate 是否完成。
+7. read_messages 和 list_team 仅用于主动检查或诊断，不是同步机制。
+8. 收到 <team-notification> 后，根据其中的 result 继续当前任务。
+9. 如果 notification 表示 timeout，应决定继续等待、检查失败原因或使用已有结果，不要无限重试。
+""".strip()
 
 
 @dataclass
@@ -87,14 +106,16 @@ def create_master_runtime(history: List,
     content_config = config.Config().get_content_length()
     tool_definitions = list(tools.TOOLS_LIST)
     tool_handlers = dict(tools.TOOLS_HANDLERS)
+    master_prompt = BASE_MASTER_PROMPT
     if team is not None:
         # master session 中所有 task 工具都绑定到 team-scoped TaskStore。
         tool_definitions += TEAM_COMMON_TOOLS + TEAM_LEAD_TOOLS
         tool_handlers |= bind_task_handlers(team.tasks)
         tool_handlers |= bind_team_handlers(team, allow_lead_tools=True)
+        master_prompt += "\n\n" + TEAM_LEAD_PROMPT
 
     agent_RunPolicy = RunPolicy(max_turns = 300,
-                                prompt = "你是一个编码助手",
+                                prompt = master_prompt,
                                 model = configured_model,
                                 fallback_model = fallback_model,
                                 tools_list = tool_definitions,
@@ -202,6 +223,7 @@ def master_agent():
         interaction=CliInteraction(),
     )
     runtime = session.runtime
+    driver = SessionDriver(runtime=runtime, team=session.team)
 
     try:
         # 告知用户系统信息。该事件也位于 finally 保护范围内。
@@ -225,7 +247,7 @@ def master_agent():
                 break
 
             # 通过统一入口执行完整 run，避免顶层 Agent 重复维护 Hook 和状态初始化。
-            agent_state, status = run_turn(runtime, user_input)
+            agent_state, status = driver.submit(user_input)
 
             # 更新上下文
             history = agent_state.messages

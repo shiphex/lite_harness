@@ -8,6 +8,8 @@ from event import EventType, make_event
 
 def test_event_type_exposes_structured_runtime_values():
     assert EventType.SYSTEM_MESSAGE == "system.message"
+    assert EventType.RUN_SUSPENDED == "run.suspended"
+    assert EventType.RUN_RESUMED == "run.resumed"
     assert EventType.TOOL_REQUESTED == "tool.requested"
     assert EventType.TOOL_COMPLETED == "tool.completed"
     assert EventType.APPROVAL_REQUESTED == "approval.requested"

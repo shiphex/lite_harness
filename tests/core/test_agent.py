@@ -114,11 +114,20 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
         runtime.state.context = context
         return SimpleNamespace(
             runtime=runtime,
+            team="team",
             close=lambda: close_calls.append(True),
         )
 
+    class FakeDriver:
+        def __init__(self, *, runtime, team):
+            captured["driver_runtime"] = runtime
+            captured["team"] = team
+
+        def submit(self, user_input):
+            return fake_run_turn(runtime, user_input)
+
     monkeypatch.setattr(agent, "create_master_session", fake_create_session)
-    monkeypatch.setattr(agent, "run_turn", fake_run_turn)
+    monkeypatch.setattr(agent, "SessionDriver", FakeDriver)
     monkeypatch.setattr(
         agent.builtin,
         "update_context",
@@ -129,6 +138,8 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
 
     assert captured["runtime"] is runtime
     assert captured["user_input"] == "hello"
+    assert captured["driver_runtime"] is runtime
+    assert captured["team"] == "team"
     assert set(created_with) == {"events", "interaction"}
     assert close_calls == [True]
     assert runtime.state.messages[0] == {"role": "user", "content": "hello"}
@@ -161,6 +172,7 @@ def test_master_agent_accepts_exit_inputs(monkeypatch, exit_input):
         "create_master_session",
         lambda history, context, **kwargs: SimpleNamespace(
             runtime=runtime,
+            team=object(),
             close=lambda: close_calls.append(True),
         ),
     )
@@ -191,8 +203,10 @@ def test_create_master_session_adds_team_tools(monkeypatch, tmp_path):
         "read_messages",
         "list_team",
         "shutdown_teammate",
+        "wait_teammates",
     } <= tool_names
-    assert "wait_teammates" not in tool_names
+    assert "wait_teammates" in session.runtime.policy.prompt
+    assert "禁止通过 read_messages" in session.runtime.policy.prompt
     assert session.runtime.agent_name == "lead"
     assert session.team._lead_agent_id == session.runtime.agent_id
     assert session.team._session_id == session.runtime.session_id

@@ -36,12 +36,17 @@ def __getattr__(name: str):
         from .agent import MasterSession
 
         return MasterSession
+    if name == "SessionDriver":
+        from .session_driver import SessionDriver
+
+        return SessionDriver
     raise AttributeError(name)
 
 
 __all__ = [
     "master_agent",
     "MasterSession",
+    "SessionDriver",
     "create_master_session",
     "run_turn",
 ]

@@ -18,6 +18,8 @@ class EventType(StrEnum):
     
     事件类型：
         - `run.started`：run 开始
+        - `run.suspended`：run 已挂起
+        - `run.resumed`：run 已恢复
         - `run.completed`：run 完成
         - `turn.started`：turn 开始
         - `assistant.message`：助手消息
@@ -39,6 +41,8 @@ class EventType(StrEnum):
 
     # run lifecycle
     RUN_STARTED = "run.started"
+    RUN_SUSPENDED = "run.suspended"
+    RUN_RESUMED = "run.resumed"
     RUN_COMPLETED = "run.completed"
 
     # query loop

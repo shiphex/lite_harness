@@ -16,6 +16,11 @@ import config
 
 from api.adapter_factory import create_adapter
 from api.contract import ModelRequest, ModelResponse
+from .control import (
+    RunDirective,
+    ToolBatchResult,
+    normalize_tool_outcome,
+)
 from .runtime import AgentRuntime
 from event.interaction import ApprovalRequest
 from tools.tool_class import ToolContext
@@ -43,14 +48,6 @@ def compact_pipeline(runtime: AgentRuntime):
                     {"role": m.get("role", ""), "content": m.get("content", "")}
                     for m in messages]
 
-    runtime.events.emit(
-                        event.make_event(
-                            runtime,
-                            event.EventType.COMPACT_STARTED,
-                            trigger="auto start compact.",
-                        )
-                    )
-
     # 执行压缩管线
     messages[:] = tools.tool_result_budget(             # L3 储存大的工具调用输出结果
         messages = messages,
@@ -60,16 +57,24 @@ def compact_pipeline(runtime: AgentRuntime):
     messages[:] = tools.micro_compact(messages)         # L2旧工具输出结果占位符替换
     # 若压缩后历史记录超过上下文大小，执行紧凑式压缩
     CONTEXT_LIMIT = 50000
-    if tools.estimate_size(messages) > CONTEXT_LIMIT:
-        messages[:] = tools.compact_history(messages, runtime.artifacts)
+    if tools.estimate_size(messages) <= CONTEXT_LIMIT:
+        return pre_compress, messages
 
     runtime.events.emit(
-                        event.make_event(
-                            runtime,
-                             event.EventType.COMPACT_COMPLETED,
-                            trigger="auto complete compact.",
-                        )
-                    )
+        event.make_event(
+            runtime,
+            event.EventType.COMPACT_STARTED,
+            trigger="auto",
+        )
+    )
+    messages[:] = tools.compact_history(messages, runtime.artifacts)
+    runtime.events.emit(
+        event.make_event(
+            runtime,
+            event.EventType.COMPACT_COMPLETED,
+            trigger="auto",
+        )
+    )
 
     return pre_compress, messages
 
@@ -244,20 +249,24 @@ def _handle_pre_tool_hook_result(
             )
 
 
-def execute_tool(response: ModelResponse, runtime: AgentRuntime):
+def execute_tool(
+    response: ModelResponse,
+    runtime: AgentRuntime,
+) -> ToolBatchResult:
     """ 执行工具调用。
 
     Args:
         response (ModelResponse): 包含工具调用信息的响应。
     
     Returns:
-        list: 更新后的会话历史记录列表，包含工具调用结果。
+        ToolBatchResult: 完整工具结果和批次控制指令。
     """
     messages = runtime.state.messages
 
     # 初始化模型输出储存列表
     results = []
-    status = "complete"
+    batch_directive = RunDirective.CONTINUE
+    suspend_request = None
     # 6. 收集 tool_use 块
     for block in response.content:
         if block.type != "tool_use":
@@ -287,7 +296,24 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
                 )
             )
 
-            messages[:] = tools.compact_history(messages, runtime.artifacts,)
+            # 当前 assistant tool_use 必须保留，稍后 query_loop 才能追加与其
+            # 对应的完整 tool_result batch，避免产生孤立 tool_result。
+            active_tool_message = (
+                messages[-1]
+                if messages and messages[-1].get("role") == "assistant"
+                else None
+            )
+            history = (
+                messages[:-1]
+                if active_tool_message is not None
+                else messages
+            )
+            compacted = tools.compact_history(history, runtime.artifacts)
+            messages[:] = (
+                [*compacted, active_tool_message]
+                if active_tool_message is not None
+                else compacted
+            )
             results.append({
                 "type": "tool_result",
                 "tool_use_id": block.id,
@@ -302,8 +328,9 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
                 )
             )
 
-            status = "compact"
-            return results, status
+            if batch_directive != RunDirective.SUSPEND:
+                batch_directive = RunDirective.RESTART
+            continue
 
         # 在执行之前，触发 PreToolUse hook
         hook_ctx = hook.make_hook_context(runtime)
@@ -341,17 +368,22 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
                     owner=(runtime.session_id, runtime.agent_id),
                     workspace=runtime.paths.workspace,
                 )
-                output = (
+                raw_output = (
                     f"[后台任务 {task_id} 已启动] "
                     "结果将在稍后收集。"
                 )
             except Exception as error:
-                output = f"错误: {error}"
+                raw_output = f"错误: {error}"
         else:
             # 执行工具调用
-            output = runtime.tools.execute(context = ToolContext(runtime), 
-                                           name = block.name, 
-                                           args = block.input)
+            raw_output = runtime.tools.execute(
+                context=ToolContext(runtime),
+                name=block.name,
+                args=block.input,
+            )
+
+        outcome = normalize_tool_outcome(raw_output)
+        output = outcome.content
 
         # 触发 PostToolUse hook
         runtime.hooks.run(hook.HookEvent.POST_TOOL_USE,
@@ -376,9 +408,23 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
             "tool_use_id": block.id,
             "content": output,
         })
-        
-    status = "complete"
-    return results, status
+
+        if outcome.directive == RunDirective.SUSPEND:
+            if suspend_request is not None:
+                raise RuntimeError("同一 tool batch 不能声明多个 suspend request")
+            batch_directive = RunDirective.SUSPEND
+            suspend_request = outcome.suspend
+        elif (
+            outcome.directive == RunDirective.RESTART
+            and batch_directive == RunDirective.CONTINUE
+        ):
+            batch_directive = RunDirective.RESTART
+
+    return ToolBatchResult(
+        results=results,
+        directive=batch_directive,
+        suspend=suspend_request,
+    )
 
 
 def query_loop(runtime: AgentRuntime):
@@ -393,7 +439,7 @@ def query_loop(runtime: AgentRuntime):
         state: 包含当前会话状态的字典。 
     
     Returns:
-        None
+        tuple: 当前 state 和带有 completed、suspended 或错误原因的状态字典。
 
     Raises:
         None
@@ -561,20 +607,37 @@ def query_loop(runtime: AgentRuntime):
                     trigger="run completed",
                 )
             )
-            return state, {"reason": "completed"}               # return Terminal — 唯一的退出点
+            return state, {"reason": "completed"}
 
         # 6. 收集 tool_use 块
         # 7. 执行工具调用
         state.messages = messages
         state.context = context
         runtime.state = state
-        results, status = execute_tool(response, runtime)
-        if status == "compact":
-            continue
-        else:
-            messages.append({"role": "user", "content": results})
+        batch = execute_tool(response, runtime)
+        if batch.results:
+            messages.append({"role": "user", "content": batch.results})
 
         tools.inject_background_results(runtime, messages)
+
+        if batch.directive == RunDirective.RESTART:
+            continue
+
+        if batch.directive == RunDirective.SUSPEND:
+            state.messages = messages
+            state.context = context
+            runtime.events.emit(
+                event.make_event(
+                    runtime,
+                    event.EventType.RUN_SUSPENDED,
+                    kind=batch.suspend.kind,
+                    payload=batch.suspend.payload,
+                )
+            )
+            return state, {
+                "reason": "suspended",
+                "request": batch.suspend,
+            }
             
         # 更新上下文
 
