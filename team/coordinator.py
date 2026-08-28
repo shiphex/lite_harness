@@ -18,7 +18,13 @@ import event
 from tools.task_system import TaskStore
 
 from .bus import MessageBus
-from .contract import MemberStatus, TeamMember, TeamMessage, TeammateProfile
+from .contract import (
+    MemberStatus,
+    TeamMember,
+    TeamMessage,
+    TeamWaitResult,
+    TeammateProfile,
+)
 from .worker import TeammateWorker
 from .worktree import WorktreeHandle, WorktreeManager
 
@@ -357,6 +363,97 @@ class TeamCoordinator:
                 message,
             )
         return messages
+
+    def validate_wait(
+        self,
+        runtime: "AgentRuntime",
+        names: list[str],
+    ) -> None:
+        """校验 lead 发起的 teammate result 等待请求。
+
+        Args:
+            runtime: 发起等待的 lead Runtime。
+            names: 需要等待最终 result 的 teammate 名称。
+
+        Raises:
+            TeamError: 调用方、成员列表或成员名称不合法时抛出。
+        """
+
+        self._assert_lead(runtime)
+        if not names:
+            raise TeamError("等待成员不能为空")
+        if any(not isinstance(name, str) or not name for name in names):
+            raise TeamError("等待成员名称必须是非空字符串")
+
+        with self._lock:
+            for name in names:
+                if name not in self.members:
+                    raise TeamError(f"未知 teammate: {name}")
+
+    def wait_for_results(
+        self,
+        runtime: "AgentRuntime",
+        names: list[str],
+        timeout_seconds: float | None = None,
+    ) -> TeamWaitResult:
+        """阻塞等待指定 teammate 均至少返回一个最终 result。
+
+        等待使用 ``MessageBus.receive`` 底层的 ``Queue.get``，没有消息时线程会
+        真正休眠，不会查询模型或执行 busy polling。等待期间收到的其他消息也会
+        一并返回给 lead。
+
+        Args:
+            runtime: 发起等待的 lead Runtime。
+            names: 需要等待最终 result 的 teammate 名称。
+            timeout_seconds: 共享等待截止时间；None 表示无限等待。
+
+        Returns:
+            TeamWaitResult: 已接收消息、已完成成员和仍待完成成员。
+        """
+
+        self.validate_wait(runtime, names)
+        requested = set(names)
+        completed: set[str] = set()
+        received: list[TeamMessage] = []
+        deadline = (
+            None
+            if timeout_seconds is None
+            else monotonic() + timeout_seconds
+        )
+
+        while completed != requested:
+            timeout = None
+            if deadline is not None:
+                timeout = deadline - monotonic()
+                if timeout <= 0:
+                    break
+
+            message = self.bus.receive("lead", timeout=timeout)
+            if message is None:
+                break
+
+            received.append(message)
+            self._emit_message(
+                runtime,
+                event.EventType.TEAM_MESSAGE_RECEIVED,
+                message,
+            )
+            if message.kind == "result" and message.sender in requested:
+                completed.add(message.sender)
+
+        for message in self.bus.drain("lead"):
+            received.append(message)
+            self._emit_message(
+                runtime,
+                event.EventType.TEAM_MESSAGE_RECEIVED,
+                message,
+            )
+
+        return TeamWaitResult(
+            messages=tuple(received),
+            completed=tuple(sorted(completed)),
+            pending=tuple(sorted(requested - completed)),
+        )
 
     def list_members(self, runtime: "AgentRuntime") -> list[TeamMember]:
         """返回带动态 ``current_task`` 的 teammate 快照。

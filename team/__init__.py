@@ -1,6 +1,12 @@
 """Agent Teams 协作平面。"""
 
-from .contract import MemberStatus, TeamMember, TeamMessage, TeammateProfile
+from .contract import (
+    MemberStatus,
+    TeamMember,
+    TeamMessage,
+    TeamWaitResult,
+    TeammateProfile,
+)
 
 
 def __getattr__(name: str):
@@ -33,6 +39,7 @@ __all__ = [
     "MemberStatus",
     "TeamMember",
     "TeamMessage",
+    "TeamWaitResult",
     "TeammateProfile",
     "TeamCoordinator",
     "TeamError",

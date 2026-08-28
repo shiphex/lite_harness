@@ -7,6 +7,7 @@
 from dataclasses import asdict
 import json
 
+from core.control import RunDirective, SuspendRequest, ToolOutcome
 from team.coordinator import TeamCoordinator, TeamError
 from tools.tool_class import ToolContext
 
@@ -51,6 +52,34 @@ TEAM_COMMON_TOOLS = [
 
 
 TEAM_LEAD_TOOLS = [
+    {
+        "name": "wait_teammates",
+        "description": (
+            "挂起当前 lead run，直到指定 teammate 均返回最终 result。"
+            "这是事件驱动等待，不会轮询或持续调用模型。"
+            "并行任务应先完成所有 spawn，再调用一次 wait_teammates。"
+            "不要使用 read_messages、list_team 或 list_tasks 循环查询执行进度。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "members": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "uniqueItems": True,
+                },
+                "timeout_seconds": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 600,
+                    "default": 120,
+                },
+            },
+            "required": ["members"],
+            "additionalProperties": False,
+        },
+    },
     {
         "name": "spawn_teammate",
         "description": (
@@ -154,6 +183,34 @@ def bind_team_handlers(
     if not allow_lead_tools:
         return handlers
 
+    def wait_teammates(
+        context: ToolContext,
+        members: list[str],
+        timeout_seconds: float = 120,
+    ) -> ToolOutcome | str:
+        """声明 lead 应挂起，直至指定 teammate result 到达。"""
+
+        try:
+            coordinator.validate_wait(context.runtime, members)
+        except TeamError as error:
+            return _team_error_result(error)
+
+        normalized_members = list(dict.fromkeys(members))
+        return ToolOutcome(
+            content=(
+                "Lead suspended until teammate results arrive: "
+                + ", ".join(normalized_members)
+            ),
+            directive=RunDirective.SUSPEND,
+            suspend=SuspendRequest(
+                kind="team.results",
+                payload={
+                    "members": normalized_members,
+                    "timeout_seconds": timeout_seconds,
+                },
+            ),
+        )
+
     def spawn_teammate(
         context: ToolContext,
         name: str,
@@ -189,6 +246,7 @@ def bind_team_handlers(
         )
 
     handlers.update({
+        "wait_teammates": wait_teammates,
         "spawn_teammate": spawn_teammate,
         "shutdown_teammate": shutdown_teammate,
     })

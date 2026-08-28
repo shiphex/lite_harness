@@ -1,7 +1,7 @@
 """Agent Teams 协作层的数据契约。
 
-本模块仅定义 roster 和 mailbox 对外可见的数据结构，不持有 Runtime、工具或
-线程对象。协作层可将这些结构直接序列化为工具结果和事件数据。
+本模块仅定义 roster、mailbox 和等待结果的数据结构，不持有 Runtime、工具或线程
+对象。协作层可将这些结构直接序列化为工具结果和事件数据。
 """
 
 from dataclasses import dataclass, field
@@ -47,6 +47,21 @@ class TeamMessage:
     kind: str = "message"
     message_id: str = field(default_factory=lambda: uuid4().hex)
     created_at: float = field(default_factory=time)
+
+
+@dataclass(slots=True, frozen=True)
+class TeamWaitResult:
+    """一次 teammate result 等待的完整结果。"""
+
+    messages: tuple[TeamMessage, ...]
+    completed: tuple[str, ...]
+    pending: tuple[str, ...]
+
+    @property
+    def timed_out(self) -> bool:
+        """仍有指定成员未返回 result 时表示本次等待超时。"""
+
+        return bool(self.pending)
 
 
 @dataclass(slots=True)

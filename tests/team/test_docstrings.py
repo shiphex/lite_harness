@@ -2,6 +2,7 @@ import inspect
 
 from core.agent import MasterSession, create_master_session
 from core.runner import run_turn
+from core.session_driver import SessionDriver
 from team.bus import MessageBus
 from team.coordinator import TeamCoordinator
 from team.factory import create_teammate_runtime
@@ -15,6 +16,8 @@ def test_agent_team_public_interfaces_have_docstrings():
 
     interfaces = [
         run_turn,
+        SessionDriver,
+        SessionDriver.submit,
         MasterSession,
         MasterSession.close,
         create_master_session,
@@ -27,6 +30,8 @@ def test_agent_team_public_interfaces_have_docstrings():
         TeamCoordinator.spawn,
         TeamCoordinator.send,
         TeamCoordinator.read_messages,
+        TeamCoordinator.validate_wait,
+        TeamCoordinator.wait_for_results,
         TeamCoordinator.list_members,
         TeamCoordinator.snapshot,
         TeamCoordinator.shutdown,

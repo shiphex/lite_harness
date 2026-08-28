@@ -56,6 +56,7 @@ def test_teammate_runtime_is_isolated_and_read_only(tmp_path):
         "edit_file",
         "subagent",
         "spawn_teammate",
+        "wait_teammates",
         "create_task",
         "update_task",
     }.isdisjoint(tool_names)
@@ -111,3 +112,19 @@ def test_spawn_tool_description_matches_profile_capabilities():
     assert "writer" in tool["description"]
     assert "只读" in tool["description"]
     assert "独立 Git worktree" in tool["description"]
+
+
+def test_wait_tool_schema_declares_event_driven_wait_contract():
+    tool = next(item for item in TEAM_LEAD_TOOLS if item["name"] == "wait_teammates")
+    schema = tool["input_schema"]
+
+    assert "事件驱动" in tool["description"]
+    assert schema["required"] == ["members"]
+    assert schema["properties"]["members"]["minItems"] == 1
+    assert schema["properties"]["members"]["uniqueItems"] is True
+    assert schema["properties"]["timeout_seconds"] == {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 600,
+        "default": 120,
+    }

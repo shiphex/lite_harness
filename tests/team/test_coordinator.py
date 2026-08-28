@@ -1,3 +1,4 @@
+from threading import Thread
 from time import monotonic, sleep
 from types import SimpleNamespace
 
@@ -84,6 +85,124 @@ def collect_messages(coordinator, lead, count, timeout=2):
         if len(messages) < count:
             sleep(0.01)
     return messages
+
+
+def test_wait_for_results_collects_preexisting_results_for_all_members(
+    tmp_path,
+    monkeypatch,
+):
+    coordinator, lead, memory_sink = make_coordinator(tmp_path, monkeypatch)
+    for name in ("alice", "bob"):
+        coordinator.spawn(
+            parent_runtime=lead,
+            name=name,
+            role="reviewer",
+            prompt=f"review as {name}",
+        )
+
+    result = coordinator.wait_for_results(
+        lead,
+        ["alice", "bob"],
+        timeout_seconds=2,
+    )
+
+    assert result.completed == ("alice", "bob")
+    assert result.pending == ()
+    assert result.timed_out is False
+    assert {message.sender for message in result.messages} == {"alice", "bob"}
+    received = [
+        item
+        for item in memory_sink.events
+        if item.type == EventType.TEAM_MESSAGE_RECEIVED
+        and item.data.get("kind") == "result"
+    ]
+    assert {item.data["sender"] for item in received} == {"alice", "bob"}
+    coordinator.shutdown_all()
+
+
+def test_wait_for_results_blocks_until_queue_notification(tmp_path, monkeypatch):
+    coordinator, lead, _ = make_coordinator(tmp_path, monkeypatch)
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="alice",
+        role="reviewer",
+        prompt="initial work",
+    )
+    collect_messages(coordinator, lead, 1)
+
+    def send_later():
+        sleep(0.02)
+        coordinator.bus.send(TeamMessage(
+            sender="alice",
+            recipient="lead",
+            content="follow-up result",
+            kind="result",
+        ))
+
+    thread = Thread(target=send_later)
+    thread.start()
+    result = coordinator.wait_for_results(
+        lead,
+        ["alice"],
+        timeout_seconds=1,
+    )
+    thread.join()
+
+    assert result.completed == ("alice",)
+    assert [message.content for message in result.messages] == ["follow-up result"]
+    coordinator.shutdown_all()
+
+
+def test_wait_for_results_returns_other_messages_and_times_out(
+    tmp_path,
+    monkeypatch,
+):
+    coordinator, lead, _ = make_coordinator(tmp_path, monkeypatch)
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="alice",
+        role="reviewer",
+        prompt="initial work",
+    )
+    collect_messages(coordinator, lead, 1)
+    coordinator.bus.send(TeamMessage(
+        sender="alice",
+        recipient="lead",
+        content="progress",
+        kind="message",
+    ))
+
+    result = coordinator.wait_for_results(
+        lead,
+        ["alice"],
+        timeout_seconds=0.01,
+    )
+
+    assert result.completed == ()
+    assert result.pending == ("alice",)
+    assert result.timed_out is True
+    assert [message.content for message in result.messages] == ["progress"]
+    coordinator.shutdown_all()
+
+
+def test_validate_wait_rejects_invalid_members_and_non_lead(tmp_path, monkeypatch):
+    coordinator, lead, _ = make_coordinator(tmp_path, monkeypatch)
+
+    with pytest.raises(TeamError, match="不能为空"):
+        coordinator.validate_wait(lead, [])
+    with pytest.raises(TeamError, match="未知 teammate"):
+        coordinator.validate_wait(lead, ["missing"])
+
+    coordinator.spawn(
+        parent_runtime=lead,
+        name="alice",
+        role="reviewer",
+        prompt="review",
+    )
+    teammate = coordinator.workers["alice"].runtime
+    with pytest.raises(TeamPermissionError, match="只有 team lead"):
+        coordinator.validate_wait(teammate, ["alice"])
+    coordinator.shutdown_all()
 
 
 def test_spawn_followup_persists_runtime_and_shutdown(tmp_path, monkeypatch):
