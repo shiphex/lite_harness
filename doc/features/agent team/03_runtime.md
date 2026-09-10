@@ -27,7 +27,7 @@ LifecycleManager
 ``` text
 spawn
 ├ success → register → IDLE
-└ failure(注册成功前) → rollback → no member 
+└ failure(spawn 发布成功前) → rollback / unregister → no member
 
 详见 F-SPAWN-01 / F-SPAWN-02
 ```
@@ -61,7 +61,7 @@ team agent 的 State Machine 转移表：
 | BUSY | dependency_wait | dependency exists | WAITING | create_task, update_task |
 | WAITING | dependency_resolved | — | BUSY | resume |
 | BUSY | task_finished | — | IDLE | publish result |
-| * | shutdown | can_stop | STOPPED | unregister |
+| * | shutdown | can_stop | STOPPED | record terminal state / emit stopped |
 | IDLE/BUSY/WAITING | fatal_runtime_error | — | FAILED | record failure / emit event |
 
 触发权限表：
@@ -74,6 +74,10 @@ team agent 的 State Machine 转移表：
 | task_finished | TeamAgent |
 | shutdown | TeamCoordinator/LifecycleManager |
 | fatal_runtime_error | LifecycleManager/runtime supervisor |
+
+表中的 Authority 表示谁可以请求或报告 transition；MemberRegistry 是唯一实际校验、应用并保存 MemberState 的 authoritative owner。所有状态变化必须通过其受控状态转换接口，非法 transition 必须被拒绝且保持原状态不变。
+
+正常 shutdown 后的 STOPPED record，以及 fatal runtime error 后的 FAILED record，在 TeamRuntime 生命周期结束前必须仍可通过 MemberRegistry 查询。`unregister` 不属于正常 shutdown 或 fatal transition 的副作用，仅用于 spawn 发布成功前的 rollback，或 TeamRuntime 最终释放。
 
 
 ## 1.3 TaskStore 中任务被认领路径
@@ -94,6 +98,8 @@ MasterAgent
     ↓ notify
 MessageBus
 ```
+
+以上 Team 路径操作 TeamRuntime 持有的 team-scoped TaskStore。现有 task-system operation 通过显式 store 注入复用；未显式注入时仍保留绑定全局 `TASKS` 的既有工具路径。具体采用函数参数、bound handler 或薄 adapter，延后到对应 Phase 决定。
 
 相关函数(已经在 task_system 中实现)：
 ``` python

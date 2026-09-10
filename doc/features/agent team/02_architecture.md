@@ -74,8 +74,12 @@ TeamCoordinator MemberRegistry      MessageBus
       └──────────────→ LifecycleManager
 ```
 - TeamRuntime = 一支 team 的运行环境和依赖集合
+- TeamRuntime 是 team composition root，负责组装并持有 team-scoped shared services；这些服务可以由 TeamRuntime 直接持有，也可以通过其组装关系间接持有。
+- TeamRuntime 与 AgentRuntime 相互独立：前者属于 Team，后者属于单个 Agent，不得合并两者的状态或职责。
+- TeamRuntime 的具体代码落点不是架构约束，由 Phase 1 按现有 package convention 和单一职责选择最小落点。
 - Coordinator = orchestration / use-case 层，负责协调，不负责实现所有东西
-- TaskStore：共享任务存储，用于存储和管理团队任务(create_task、claim_task、update_task、get_task、list_tasks)，底层基于已有 task_system
+- TaskStore：共享任务存储，用于存储和管理团队任务(create_task、claim_task、update_task、get_task、list_tasks)，底层复用已有 task_system；每个 TeamRuntime 使用独立的 team-scoped TaskStore。
+- Team 路径通过显式 store 注入复用现有 task operation，同时保留当前绑定全局 `TASKS` 的工具路径兼容性；不得复制第二套 task state 或 task behavior。
 - LifecycleManager：负责“怎么创建/停止 worker”
 - MemberRegistry：负责“现在有哪些 worker”
 - MessageBus：负责各个团队成员之间的消息传递
@@ -124,22 +128,25 @@ LifecycleManager
     管 worker 生命周期
 
 MemberRegistry
-    管 team-visible member metadata
-    包括当前 MemberState 
+    是 team-visible member metadata / MemberState 的唯一 authoritative owner
+    校验并应用所有 MemberState transition
+    包括当前 MemberState
         (具体状态及 transition 见 03_runtime.md #1.2)
 
-TeamAgent
-    通过明确接口 report_state(...)
+授权模块
+    通过受控状态转换接口请求或报告 transition
 ```
 
 ## 2.5 MemberRegistry 边界设计
 
 责任:
 - register member
-- unregister member
 - query members
 - maintain member metadata
 - owns MemberState
+- 提供受控状态转换入口，校验并应用所有 MemberState transition
+- 在 TeamRuntime 生命周期结束前保留 STOPPED / FAILED member record，使其仍可查询
+- unregister 仅用于 spawn 发布成功前的 rollback，或 TeamRuntime 最终释放
 
 不能负责:
 - spawn AgentRuntime

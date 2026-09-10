@@ -19,21 +19,24 @@ E2E smoke:
 - [ ] STATE-01 STARTING → IDLE allowed
 - [ ] STATE-02 IDLE → BUSY allowed
 - [ ] STATE-03 IDLE --shutdown--> STOPPED allowed
-- [ ] STATE-04 STOPPED → BUSY forbidden
+- [ ] STATE-04 STOPPED → BUSY forbidden，拒绝后仍为 STOPPED
 - [ ] STATE-05 STOPPED --task_claimed--> BUSY forbidden
+- [ ] STATE-06 正常 shutdown 后 `MemberRegistry.get(agent_id)` 仍返回 STOPPED member record
+- [ ] STATE-07 fatal runtime error 后 `MemberRegistry.get(agent_id)` 仍返回 FAILED member record
 
 
 # 3. Failure Tests
 - [ ] F-SPAWN-01 → test_spawn_runtime_failure_rolls_back
 - [ ] F-SPAWN-02 → test_register_failure_destroys_runtime
 - [ ] F-MSG-01 → test_send_to_unknown_member_rejected
+- [ ] F-STATE-01 → test_invalid_member_transition_rejected_without_state_change
 
 
 # 4. 测试项目
 
 # 4.1 架构测试
 - [ ] ARCH-01:
-team/registry.py 不允许 import AgentRuntimeFactory
+team/registry.py 不允许 import RuntimeFactory
 
 - [ ] ARCH-02:
 TeamAgent communication 必须经过 MailboxHandle / MessageBus boundary，
@@ -45,7 +48,19 @@ Agent creation 入口必须经过 LifecycleManager
 - [ ] ARCH-04:
 全部 TeamAgent 使用 AgentRuntime / query_loop 执行任务
 
-# 4.2 成功标准
+- [ ] ARCH-05:
+TeamRuntime 是独立的 team composition root，不并入 AgentRuntime；team-scoped shared services 由 TeamRuntime 组装并持有。
+
+- [ ] ARCH-06:
+Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，不得定义第二套 task model 或引入 Scheduler。
+
+# 4.2 Contract / Isolation 测试
+- [ ] STORE-01 两个 TeamRuntime 使用不同 TaskStore，写入与读取互不污染
+- [ ] STORE-02 未显式注入 store 的现有工具路径继续使用全局 `TASKS`，原有行为保持兼容
+- [ ] REGISTRY-01 所有 MemberState transition 均经过 MemberRegistry 的受控入口
+- [ ] REGISTRY-02 `unregister` 仅可用于 spawn 发布前 rollback 或 TeamRuntime 最终释放
+
+# 4.3 成功标准
 `doc\features\agent team\01_problem.md` 中的 `# 4. Success Criteria`
 
 
@@ -53,9 +68,9 @@ Agent creation 入口必须经过 LifecycleManager
 # 5. Traceability Matrix
 |state| Requirement | Architecture | Contract | Failure | ADR | Test | Task |
 |---|---|---|---|---|---|---|---|
-| [ ] | SC-01 spawn | architecture 2.4 | contract 2.4 | F-SPAWN-01/02 | - | - | - |
+| [ ] | SC-01 spawn | architecture 2.4/2.5 | contract 2.4/2.5 | F-SPAWN-01/02 | ADR-001/002 | STATE-01/REGISTRY-02 | - |
 | [ ] | SC-02 统一 AgentRuntime / query_loop | architecture 1.1/2.2 | AgentRuntime existing contract（如果不在 Agent Team 文档，可写 existing runtime） | - | - | ARCH-04 | - |
 | [ ] | SC-03 messaging | architecture 2.3 | contract 2.3 | F-MSG-01 | ADR-004/006 | - | - |
-| [ ] | SC-04 lifecycle entry | architecture 2.4 | contract 2.4 | F-STOP-01 | ADR-005 | ARCH-03 | - |
-| [ ] | SC-05 no cross-module state mutation | architecture 2.3 | contract 2.3 |  F-MSG-01/02 | ADR-004 | ARCH-02/F-MSG-01 | - |
+| [ ] | SC-04 lifecycle entry | architecture 2.4/2.5 | contract 2.4/2.5 | F-STOP-01/F-STATE-01 | ADR-002/005 | STATE-03/04/06/07、ARCH-03、REGISTRY-01/02 | - |
+| [ ] | SC-05 no cross-module state mutation | architecture 2.3/2.5 | contract 2.2/2.3/2.5 | F-MSG-01/02、F-STATE-01 | ADR-002/003/004 | ARCH-02/06、STORE-01/02、REGISTRY-01 | - |
 

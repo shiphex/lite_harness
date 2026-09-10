@@ -28,17 +28,18 @@ Optional Real-model E2E Smoke 在 Phase 6 完成后执行，不阻塞 MVP。
 
 # Current Facts
 
-> 下列内容是基于当前代码的初步观察，不是本任务的预设结论。
-> 执行时必须用独立证据将每项标记为 `confirmed`、`refuted` 或 `qualified`。
+> TASK-01 已使用独立代码证据验证下列事实，Human Review 已接受验证结果。
 
-| ID | Preliminary code fact | Initial evidence |
-| --- | --- | --- |
-| CF-01 | `AgentRuntime` 已存在。 | `core/runtime.py::AgentRuntime` |
-| CF-02 | 当前 MasterAgent 和 Subagent 均通过 `query_loop` 执行。 | `core/agent.py::master_agent`、`tools/subagent.py::run_subagent` |
-| CF-03 | `task_system` 已使用 JSON 持久化任务。 | `tools/task_system.py::TaskStore.create`、`TaskStore.save`、`TaskStore.load` |
-| CF-04 | `claim_task` / `complete_task` 已存在，但当前是绑定模块级全局 `TASKS` 的函数，尚未形成可直接注入 TeamRuntime 的实例协议。 | `tools/task_system.py::TASKS`、`claim_task`、`complete_task` |
-| CF-05 | 当前目标分支中未发现 team-level member registry。 | 当前代码树与 `MemberRegistry` 符号搜索 |
-| CF-06 | 当前目标分支中未发现 mailbox abstraction。 | 当前代码树与 `MailboxHandle` / `MessageBus` 符号搜索 |
+Validated against: `f90561fff98dcc86ec4261b38e6c32f04c9a9f96`
+
+| ID | Status | Confirmed code fact | Evidence |
+| --- | --- | --- | --- |
+| CF-01 | `confirmed` | `AgentRuntime` 已存在。 | `core/runtime.py::AgentRuntime` |
+| CF-02 | `confirmed` | 当前 MasterAgent 和 Subagent 均通过 `query_loop` 执行。 | `core/agent.py::master_agent`、`tools/subagent.py::run_subagent` |
+| CF-03 | `confirmed` | `task_system` 已使用 JSON 持久化任务。 | `tools/task_system.py::TaskStore.create`、`TaskStore.save`、`TaskStore.load` |
+| CF-04 | `confirmed` | `claim_task` / `complete_task` 已存在，但当前是绑定模块级全局 `TASKS` 的函数，尚未形成可直接注入 TeamRuntime 的实例协议。 | `tools/task_system.py::TASKS`、`claim_task`、`complete_task` |
+| CF-05 | `confirmed` | 当前目标分支中未发现 team-level member registry。 | 当前代码树与 `MemberRegistry` 符号搜索 |
+| CF-06 | `confirmed` | 当前目标分支中未发现 mailbox abstraction。 | 当前代码树与 `MailboxHandle` / `MessageBus` 符号搜索 |
 
 ## Accepted Design Constraints
 
@@ -46,74 +47,36 @@ Optional Real-model E2E Smoke 在 Phase 6 完成后执行，不阻塞 MVP。
 | --- | --- | --- |
 | DC-01 | TeamAgent 复用现有 `AgentRuntime`，不新建一套 TeamAgentRuntime。 | `01_problem.md` §2.1、`02_architecture.md` §2.2 |
 | DC-02 | TeamAgent 必须通过统一 `query_loop` 执行。 | `01_problem.md` SC-02、`07_test_plan.md` ARCH-04 |
+| DC-03 | TeamRuntime 是独立于 AgentRuntime 的 team composition root，负责组装并持有 team-scoped shared services；具体代码落点不是架构约束。 | `02_architecture.md` §2.1、`06_decisions.md` ADR-001 |
+| DC-04 | MemberRegistry 是 MemberState 的唯一 authoritative owner；所有状态变化经过受控转换入口，STOPPED / FAILED record 保留到 TeamRuntime 最终释放。 | `02_architecture.md` §2.4～2.5、`03_runtime.md` §1.2、`04_contracts.md` §2.5、`06_decisions.md` ADR-002 |
+| DC-05 | 每个 TeamRuntime 使用独立的现有 TaskStore；Team 路径采用显式 store 注入，不复制任务逻辑，并保持全局 `TASKS` 工具路径兼容。 | `02_architecture.md` §2.1、`04_contracts.md` §2.2 / §3.2、`06_decisions.md` ADR-003 |
+| DC-06 | 设计和测试引用现有 runtime factory 时使用实际符号 `RuntimeFactory`。 | `core/runtime.py::RuntimeFactory`、`07_test_plan.md` ARCH-01 |
 
 
-# TASK-01 Existing Code Gap Analysis
+# Completed Tasks
 
-Status:
-Ready
+## TASK-01 Existing Code Gap Analysis
 
-Goal:
-验证 Current Facts，并仅深入分析足以正确规划 Phase 1 的现有代码现实。以最终回复形式提交可复核的证据和 `GO/NO-GO for Phase 1` 结论。
+Status: Done
 
-References:
+Baseline: `f90561fff98dcc86ec4261b38e6c32f04c9a9f96`
 
-- REQUIREMENT: `01_problem.md` §2 Goal、§3 Non-goal、§4 Success Criteria
-- FACTS: 本文 `Current Facts` 与 `Accepted Design Constraints`
-- ARCH: `02_architecture.md`、`03_runtime.md`
-- CONTRACT: `04_contracts.md`
-- FAILURE: `05_failures.md`
-- ADR: `06_decisions.md` 中的 ADR-001～ADR-006
-- TEST: `07_test_plan.md` 与 `01_problem.md` 中的 SC-01～SC-07
+Outcome:
 
-Preconditions:
+- CF-01～CF-06 confirmed。
+- DD-01～DD-04 reviewed and adjudicated。
+- Phase 1: GO。
 
-- `01_problem.md`～`07_test_plan.md` 是当前设计基线。
-- `feature/team` 是目标分支。
-- `feature/agent_teams` 只作为只读参考。
+Decision references:
 
-Allowed scope:
+- `02_architecture.md` §2.1、§2.4～2.5
+- `03_runtime.md` §1.1～1.3
+- `04_contracts.md` §2.2、§2.5、§3.2
+- `05_failures.md` §1～§2
+- `06_decisions.md` ADR-001～ADR-003
+- `07_test_plan.md` STATE-04～STATE-07、F-STATE-01、ARCH-01 / ARCH-05 / ARCH-06、STORE-01 / STORE-02、REGISTRY-01 / REGISTRY-02
 
-- 只读检查 Runtime、query loop、master/subagent、TaskStore、工具注册、事件和测试设施。
-- 可运行不改写仓库文件的测试或静态搜索。
-- 必须先完成当前代码检查；只有在存在具体 Phase 1 未决问题时，才可使用 `git show` 定向检查旧分支中的对应符号。
-- 分析结果仅通过最终回复提交，不新增差距分析文档。
+History:
 
-Must:
-
-- 首先记录当前 HEAD、Git 工作区状态、测试命令和实际结果。测试成功或失败都必须如实报告；失败本身不使差距分析无法完成。
-- 用独立代码证据验证每条 Current Fact，并标记为 `confirmed`、`refuted` 或 `qualified`。
-- 对 TeamRuntime、TeamCoordinator、LifecycleManager、MemberRegistry、MessageBus、MailboxHandle、TeamAgent、TaskStore 集成和 Master 工具入口做浅层盘点；每项只记录代码证据、`reuse/adapt/new/avoid` 结论、适用契约和目标 Phase。
-- 仅深入分析 Phase 1 所需的 AgentRuntime/RuntimeFactory 复用边界、TeamRuntime composition 与服务实例所有权、TaskStore 全局状态与实例注入、MemberRegistry 状态所有权，以及已接受 Contract 在当前代码结构中的可落实性。
-- 将 `run_turn()` 与执行监督延后到 Spawn，mailbox capacity 延后到 Messaging，assignment 详细语义延后到 Task Collaboration，teardown failure aggregation 延后到 Shutdown，各纵切的具体 typed failure 变体延后到对应任务。
-- 如果定向检查了旧分支，只记录与具体 Phase 1 问题相关的可参考模式与不可继承边界。
-- 给出 `GO/NO-GO for Phase 1` 结论；只有影响 Phase 1 的未解决设计冲突可以阻塞下一阶段。
-
-Must not:
-
-- 不实现或复制 `team/` 代码。
-- 不修改任何仓库文件，包括生产代码、测试、设计文档和本任务文档。
-- 不深入研究已明确延后到后续 Phase 的问题。
-- 不引入 worktree/workspace、空闲自动领任务、Scheduler、idle timeout 或成本回收。
-- 不自动继承当前 Spec 未定义的旧分支机制；如果认为后续必需，只能记录为 Design Delta。
-- 不通过实现细节擅自填补设计冲突。
-
-Verify:
-
-- 最终回复包含 Baseline、Current Facts Validation、Component Inventory、Phase 1 Blockers、Deferred Questions、Design Deltas、GO/NO-GO for Phase 1 和 Handoff 八部分。
-- 所有结论都附有文件路径、符号或设计条目证据。
-- 报告必须记录测试命令和实际结果，不把固定的 passed 数量作为验收条件。
-- 执行前后的 Git 状态一致。
-- `GO/NO-GO` 只由 Phase 1 Blockers 决定；Deferred Questions 不得阻塞 Phase 1。
-
-Handoff:
-
-- Codex 只提交最终报告，不修改仓库。
-- Human 审阅报告，并决定接受、拒绝或要求补充证据。
-- 只有被 Human 接受的事实才更新到 Current Facts，被接受的设计变化才更新到 `01_problem.md`～`07_test_plan.md`。
-- Human Review 完成后，再展开下一个详细任务。
-
-Design delta:
-
-- 发现 Spec 缺失或矛盾时，记录来源、影响、备选方案和推荐项。
-- 阻塞受影响的后续任务，等待设计决策，不通过扩大实现范围解决。
+- [TASK-01 Gap Analysis](_history/TASK-01_gap-analysis.md)
+- [TASK-01 Human Review](_history/TASK-01_human-review.md)
