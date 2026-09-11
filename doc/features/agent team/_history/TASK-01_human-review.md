@@ -95,7 +95,7 @@ Superseded by: updated `../02_architecture.md`、`../03_runtime.md`、`../04_con
         没有为了 store injection 引入新的 scheduler/task subsystem
 
 ## DD-04
-- Fact: 设计测试中引用 AgentRuntimeFactory，现有代码实际符号为 RuntimeFactory。
+- Fact: 设计测试中引用 AgentRuntimeFactory，现有代码实际符号为 RuntimeFactory（evidence: `f90561f/core/runtime.py:143`）。
 - Decision: 使用 RuntimeFactory
 - Why: 现有代码实际使用 RuntimeFactory。
 - Deferred: None

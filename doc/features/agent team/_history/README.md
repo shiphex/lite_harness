@@ -37,6 +37,21 @@
 - `TASK-01_gap-analysis.md`
 - `TASK-01_human-review.md`
 
+## Evidence References
+
+历史代码或文档证据使用以下形式：
+
+```text
+<baseline-commit>/<repo-relative-path>:<line>
+```
+
+例如：`f90561f/core/runtime.py:113`。当同一段已经明确唯一 baseline 时，也可以简写为 `core/runtime.py:113`。
+
+- 不使用 `E:/...`、`C:/...` 等本机绝对路径。
+- 历史 evidence 绑定调查当时的 baseline，不随 living document 的后续行号变化。
+- 指向当前 authoritative contract 的引用继续使用 `path + §section`。
+- History、Review 和 Source of Truth 之间的导航使用仓库相对链接；导航链接不作为历史 evidence。
+
 ## Required Metadata
 
 正式报告必须包含：
@@ -60,4 +75,3 @@ Superseded by: <updated authoritative documents>
 ```
 
 归档文件保留当时的事实、判断和结论。后续变化通过 Review、ADR、Git 或新归档链接表达，不把旧报告改写成当前结论。
-

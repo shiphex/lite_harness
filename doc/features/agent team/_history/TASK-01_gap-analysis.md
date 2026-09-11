@@ -5,6 +5,7 @@ Task: TASK-01 Existing Code Gap Analysis
 Baseline: `f90561fff98dcc86ec4261b38e6c32f04c9a9f96`
 Outcome: Human reviewed
 Source of Truth: `../01_problem.md` through `../08_tasks.md`
+Evidence format: `f90561f/<repo-relative-path>:<line>`
 
 ---
 
@@ -23,12 +24,12 @@ Source of Truth: `../01_problem.md` through `../08_tasks.md`
 
 | Fact | 结果 | 代码证据 | 结论 |
 |---|---|---|---|
-| CF-01 | `confirmed` | [core/runtime.py:113](</E:/Workplace/Learn_project/lite_harness/core/runtime.py:113>) | `AgentRuntime` 已存在，并由 `RuntimeFactory` 创建。 |
-| CF-02 | `confirmed` | [core/agent.py:147](</E:/Workplace/Learn_project/lite_harness/core/agent.py:147>)、[tools/subagent.py:167](</E:/Workplace/Learn_project/lite_harness/tools/subagent.py:167>) | 当前 MasterAgent 和 Subagent 均直接调用统一 `query_loop`。 |
-| CF-03 | `confirmed` | [tools/task_system.py:96](</E:/Workplace/Learn_project/lite_harness/tools/task_system.py:96>)、[tools/task_system.py:195](</E:/Workplace/Learn_project/lite_harness/tools/task_system.py:195>)、[tools/task_system.py:206](</E:/Workplace/Learn_project/lite_harness/tools/task_system.py:206>) | TaskStore 使用 JSON 文件创建、保存和加载任务。 |
-| CF-04 | `confirmed` | [tools/task_system.py:243](</E:/Workplace/Learn_project/lite_harness/tools/task_system.py:243>)、[tools/task_system.py:330](</E:/Workplace/Learn_project/lite_harness/tools/task_system.py:330>)、[tools/task_system.py:352](</E:/Workplace/Learn_project/lite_harness/tools/task_system.py:352>) | claim/complete 是操作全局 `TASKS` 的模块函数；`TaskStore` 实例尚不具备完整 Team 协议。 |
-| CF-05 | `confirmed` | 当前代码树不存在 `team/`，`core/`、`tools/`、`tests/` 中未找到 `MemberRegistry` | 当前无 team-level registry。 |
-| CF-06 | `confirmed` | 当前代码中未找到 `MailboxHandle` 或 `MessageBus` | 当前无 mailbox abstraction。 |
+| CF-01 | `confirmed` | `f90561f/core/runtime.py:113` | `AgentRuntime` 已存在，并由 `RuntimeFactory` 创建。 |
+| CF-02 | `confirmed` | `f90561f/core/agent.py:147`、`f90561f/tools/subagent.py:167` | 当前 MasterAgent 和 Subagent 均直接调用统一 `query_loop`。 |
+| CF-03 | `confirmed` | `f90561f/tools/task_system.py:96`、`f90561f/tools/task_system.py:195`、`f90561f/tools/task_system.py:206` | TaskStore 使用 JSON 文件创建、保存和加载任务。 |
+| CF-04 | `confirmed` | `f90561f/tools/task_system.py:243`、`f90561f/tools/task_system.py:330`、`f90561f/tools/task_system.py:352` | claim/complete 是操作全局 `TASKS` 的模块函数；`TaskStore` 实例尚不具备完整 Team 协议。 |
+| CF-05 | `confirmed` | `f90561f` repository tree；`MemberRegistry` symbol search：no matches | 当前无 team-level registry。 |
+| CF-06 | `confirmed` | `f90561f` symbol search；`MailboxHandle` / `MessageBus`：no matches | 当前无 mailbox abstraction。 |
 
 DC-01、DC-02 与现有代码及设计一致：TeamAgent 应通过配置现有 `AgentRuntime` 获得能力，不应引入第二套 Runtime；实际执行继续复用 `query_loop`。
 
@@ -36,7 +37,7 @@ DC-01、DC-02 与现有代码及设计一致：TeamAgent 应通过配置现有 `
 
 | Component | 分类 | 当前证据与缺口 | Contract / Target Phase |
 |---|---|---|---|
-| AgentRuntime / RuntimeFactory | `reuse` | Factory 支持注入 `session_id`、EventSink、Interaction，并为每个 Runtime 生成独立 `agent_id`；无需新 Runtime 类型。[core/runtime.py:143](</E:/Workplace/Learn_project/lite_harness/core/runtime.py:143>) | DC-01/02；Phase 1/2 |
+| AgentRuntime / RuntimeFactory | `reuse` | Factory 支持注入 `session_id`、EventSink、Interaction，并为每个 Runtime 生成独立 `agent_id`；无需新 Runtime 类型。`f90561f/core/runtime.py:143` | DC-01/02；Phase 1/2 |
 | TeamRuntime | `new` | 当前无实现；设计要求其持有五个共享服务，但预定目录没有说明其代码落点。 | ADR-001、Contract 3.2；Phase 1 |
 | TeamCoordinator | `new` | 当前无实现；只应编排 use case，不持有内部状态或创建 Runtime。 | Contract 3.1；Phase 1 建立边界，Phase 2–5 实现用例 |
 | LifecycleManager | `new` | 当前无实现；`RuntimeFactory` 可作为其后续 Runtime 创建依赖。 | Contract 2.4；Phase 1 边界、Phase 2/5 行为 |
@@ -45,7 +46,7 @@ DC-01、DC-02 与现有代码及设计一致：TeamAgent 应通过配置现有 `
 | MailboxHandle | `new` | 当前无实现；应作为 Agent 的窄能力入口，不能拥有 mailbox storage。 | Contract 2.1；Phase 3 |
 | TeamAgent | `adapt` | 复用 AgentRuntime；需在 Spawn 阶段新增 Team 专用 policy、工具和执行包装，不新增 TeamAgentRuntime。 | SC-01/02、DC-01/02；Phase 2 |
 | TaskStore integration | `adapt` | 持久化模型可复用，但完整操作仍绑定全局 `TASKS`，与 TeamRuntime-owned service 不匹配。 | Contract 2.2/3.2；Phase 1 边界、Phase 4 行为 |
-| Master tool entry | `adapt` | Master policy 当前硬编码全局 `TOOLS_LIST`/`TOOLS_HANDLERS`；ToolExecutor 本身支持每 Runtime 注入 handler。[core/agent.py:49](</E:/Workplace/Learn_project/lite_harness/core/agent.py:49>)、[core/loop.py:348](</E:/Workplace/Learn_project/lite_harness/core/loop.py:348>) | Runtime 1.1、Coordinator 3.1；Phase 2 |
+| Master tool entry | `adapt` | Master policy 当前硬编码全局 `TOOLS_LIST`/`TOOLS_HANDLERS`；ToolExecutor 本身支持每 Runtime 注入 handler。`f90561f/core/agent.py:49`、`f90561f/core/loop.py:348` | Runtime 1.1、Coordinator 3.1；Phase 2 |
 
 定向旧分支审查结果：
 
@@ -59,7 +60,7 @@ DC-01、DC-02 与现有代码及设计一致：TeamAgent 应通过配置现有 `
 
 **Invariant:** TeamRuntime 是 composition root，并在 team 生命周期内持有唯一共享服务。
 
-**Evidence:** [02_architecture.md:33](</E:/Workplace/Learn_project/lite_harness/doc/features/agent team/02_architecture.md:33>) 定义 TeamRuntime；[04_contracts.md:3](</E:/Workplace/Learn_project/lite_harness/doc/features/agent team/04_contracts.md:3>) 的目录却没有 `team/runtime.py`。
+**Evidence:** `f90561f/doc/features/agent team/02_architecture.md:33` 定义 TeamRuntime；`f90561f/doc/features/agent team/04_contracts.md:3` 的目录却没有 `team/runtime.py`。
 
 **Impact:** 下一任务无法明确由哪个模块创建和持有 Coordinator、Registry、MessageBus、TaskStore、LifecycleManager。
 
@@ -71,10 +72,10 @@ DC-01、DC-02 与现有代码及设计一致：TeamAgent 应通过配置现有 `
 
 **Evidence:**
 
-- 架构要求 TeamAgent 通过 `report_state(...)`：[02_architecture.md:126](</E:/Workplace/Learn_project/lite_harness/doc/features/agent team/02_architecture.md:126>)
-- Registry Contract 没有 `report_state` 或 `transition`：[04_contracts.md:53](</E:/Workplace/Learn_project/lite_harness/doc/features/agent team/04_contracts.md:53>)
-- shutdown 转移同时要求 STOPPED 和 unregister：[03_runtime.md:64](</E:/Workplace/Learn_project/lite_harness/doc/features/agent team/03_runtime.md:64>)
-- Failure Policy 又要求 fatal failure 具有可观察终态：[05_failures.md:8](</E:/Workplace/Learn_project/lite_harness/doc/features/agent team/05_failures.md:8>)
+- 架构要求 TeamAgent 通过 `report_state(...)`：`f90561f/doc/features/agent team/02_architecture.md:126`
+- Registry Contract 没有 `report_state` 或 `transition`：`f90561f/doc/features/agent team/04_contracts.md:53`
+- shutdown 转移同时要求 STOPPED 和 unregister：`f90561f/doc/features/agent team/03_runtime.md:64`
+- Failure Policy 又要求 fatal failure 具有可观察终态：`f90561f/doc/features/agent team/05_failures.md:8`
 
 **Impact:** 如果 unregister 删除记录，就无法查询 STOPPED/FAILED；如果各调用方直接赋值，则违反 ADR-002 和 SC-05。
 
@@ -93,9 +94,9 @@ DC-01、DC-02 与现有代码及设计一致：TeamAgent 应通过配置现有 `
 
 **Evidence:**
 
-- Contract 要求 `create_task/update_task/can_start/claim_task/complete_task/get_task`：[04_contracts.md:20](</E:/Workplace/Learn_project/lite_harness/doc/features/agent team/04_contracts.md:20>)
+- Contract 要求 `create_task/update_task/can_start/claim_task/complete_task/get_task`：`f90561f/doc/features/agent team/04_contracts.md:20`
 - 当前 `TaskStore` 实例只有 `create/update_dependencies/save/load/list`。
-- 其余操作通过全局 `TASKS` 完成：[tools/task_system.py:243](</E:/Workplace/Learn_project/lite_harness/tools/task_system.py:243>)
+- 其余操作通过全局 `TASKS` 完成：`f90561f/tools/task_system.py:243`
 
 **Impact:** 直接把现有 TaskStore 放入 TeamRuntime 不能满足 Contract；在 `team/tasks.py` 复制任务逻辑又会产生第二套状态实现。
 
@@ -137,7 +138,7 @@ DC-01、DC-02 与现有代码及设计一致：TeamAgent 应通过配置现有 `
 
 ### DD-04：修正架构测试中的实际符号名
 
-[07_test_plan.md:36](</E:/Workplace/Learn_project/lite_harness/doc/features/agent team/07_test_plan.md:36>) 写的是 `AgentRuntimeFactory`，实际类名是 `RuntimeFactory`。应修正 ARCH-01，否则后续 import-boundary test 可能检查错误符号。该项不单独阻塞 Phase 1。
+`f90561f/doc/features/agent team/07_test_plan.md:36` 写的是 `AgentRuntimeFactory`，实际类名是 `RuntimeFactory`。应修正 ARCH-01，否则后续 import-boundary test 可能检查错误符号。该项不单独阻塞 Phase 1。
 
 ## 7. GO/NO-GO for Phase 1
 

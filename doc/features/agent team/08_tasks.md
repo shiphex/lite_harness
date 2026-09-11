@@ -34,12 +34,12 @@ Validated against: `f90561fff98dcc86ec4261b38e6c32f04c9a9f96`
 
 | ID | Status | Confirmed code fact | Evidence |
 | --- | --- | --- | --- |
-| CF-01 | `confirmed` | `AgentRuntime` 已存在。 | `core/runtime.py::AgentRuntime` |
-| CF-02 | `confirmed` | 当前 MasterAgent 和 Subagent 均通过 `query_loop` 执行。 | `core/agent.py::master_agent`、`tools/subagent.py::run_subagent` |
-| CF-03 | `confirmed` | `task_system` 已使用 JSON 持久化任务。 | `tools/task_system.py::TaskStore.create`、`TaskStore.save`、`TaskStore.load` |
-| CF-04 | `confirmed` | `claim_task` / `complete_task` 已存在，但当前是绑定模块级全局 `TASKS` 的函数，尚未形成可直接注入 TeamRuntime 的实例协议。 | `tools/task_system.py::TASKS`、`claim_task`、`complete_task` |
-| CF-05 | `confirmed` | 当前目标分支中未发现 team-level member registry。 | 当前代码树与 `MemberRegistry` 符号搜索 |
-| CF-06 | `confirmed` | 当前目标分支中未发现 mailbox abstraction。 | 当前代码树与 `MailboxHandle` / `MessageBus` 符号搜索 |
+| CF-01 | `confirmed` | `AgentRuntime` 已存在。 | `f90561f/core/runtime.py:113` |
+| CF-02 | `confirmed` | 当前 MasterAgent 和 Subagent 均通过 `query_loop` 执行。 | `f90561f/core/agent.py:147`、`f90561f/tools/subagent.py:167` |
+| CF-03 | `confirmed` | `task_system` 已使用 JSON 持久化任务。 | `f90561f/tools/task_system.py:96`、`f90561f/tools/task_system.py:195`、`f90561f/tools/task_system.py:206` |
+| CF-04 | `confirmed` | `claim_task` / `complete_task` 已存在，但当前是绑定模块级全局 `TASKS` 的函数，尚未形成可直接注入 TeamRuntime 的实例协议。 | `f90561f/tools/task_system.py:243`、`f90561f/tools/task_system.py:330`、`f90561f/tools/task_system.py:352` |
+| CF-05 | `confirmed` | 当前目标分支中未发现 team-level member registry。 | `f90561f` repository tree；`MemberRegistry` symbol search：no matches |
+| CF-06 | `confirmed` | 当前目标分支中未发现 mailbox abstraction。 | `f90561f` symbol search；`MailboxHandle` / `MessageBus`：no matches |
 
 ## Accepted Design Constraints
 
@@ -50,7 +50,7 @@ Validated against: `f90561fff98dcc86ec4261b38e6c32f04c9a9f96`
 | DC-03 | TeamRuntime 是独立于 AgentRuntime 的 team composition root，负责组装并持有 team-scoped shared services；具体代码落点不是架构约束。 | `02_architecture.md` §2.1、`06_decisions.md` ADR-001 |
 | DC-04 | MemberRegistry 是 MemberState 的唯一 authoritative owner；所有状态变化经过受控转换入口，STOPPED / FAILED record 保留到 TeamRuntime 最终释放。 | `02_architecture.md` §2.4～2.5、`03_runtime.md` §1.2、`04_contracts.md` §2.5、`06_decisions.md` ADR-002 |
 | DC-05 | 每个 TeamRuntime 使用独立的现有 TaskStore；Team 路径采用显式 store 注入，不复制任务逻辑，并保持全局 `TASKS` 工具路径兼容。 | `02_architecture.md` §2.1、`04_contracts.md` §2.2 / §3.2、`06_decisions.md` ADR-003 |
-| DC-06 | 设计和测试引用现有 runtime factory 时使用实际符号 `RuntimeFactory`。 | `core/runtime.py::RuntimeFactory`、`07_test_plan.md` ARCH-01 |
+| DC-06 | 设计和测试引用现有 runtime factory 时使用实际符号 `RuntimeFactory`。 | `f90561f/core/runtime.py:143`、`07_test_plan.md` ARCH-01 |
 
 
 # Completed Tasks
