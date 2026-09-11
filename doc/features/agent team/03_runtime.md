@@ -48,9 +48,13 @@ BUSY/WAITING/IDLE
    ↓ fatal_runtime_error
 FAILED(record failure / emit event)
 
-IDLE/BUSY/WAITING/FAILED
+IDLE/BUSY/WAITING
    ↓ shutdown
 STOPPED
+
+FAILED
+   ↓ shutdown / cleanup
+FAILED
 ```
 
 team agent 的 State Machine 转移表：
@@ -61,7 +65,7 @@ team agent 的 State Machine 转移表：
 | BUSY | dependency_wait | dependency exists | WAITING | create_task, update_task |
 | WAITING | dependency_resolved | — | BUSY | resume |
 | BUSY | task_finished | — | IDLE | publish result |
-| * | shutdown | can_stop | STOPPED | record terminal state / emit stopped |
+| IDLE/BUSY/WAITING | shutdown | can_stop | STOPPED | record terminal state / emit stopped |
 | IDLE/BUSY/WAITING | fatal_runtime_error | — | FAILED | record failure / emit event |
 
 触发权限表：
