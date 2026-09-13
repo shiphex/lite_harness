@@ -9,6 +9,7 @@ Typical usage example:
 """
 
 from typing import List, Dict
+from uuid import uuid4
 
 import hook
 import builtin
@@ -29,6 +30,9 @@ def create_master_runtime(history: List,
                           context: Dict,
                           events: EventSink,
                           interaction: Interaction,
+                          session_id: str | None = None,
+                          additional_tools: List | None = None,
+                          additional_tool_handlers: Dict | None = None,
                         ):
     """ 创建主 Agent 的运行时环境。
 
@@ -46,12 +50,17 @@ def create_master_runtime(history: List,
         or configured_model["model_name"]
     )
     content_config = config.Config().get_content_length()
+    tool_definitions = [*tools.TOOLS_LIST, *(additional_tools or [])]
+    tool_handlers = {
+        **tools.TOOLS_HANDLERS,
+        **(additional_tool_handlers or {}),
+    }
     agent_RunPolicy = RunPolicy(max_turns = 300,
                                 prompt = "你是一个编码助手",
                                 model = configured_model,
                                 fallback_model = fallback_model,
-                                tools_list = tools.TOOLS_LIST, 
-                                tool_handler = tools.TOOLS_HANDLERS,
+                                tools_list = tool_definitions,
+                                tool_handler = tool_handlers,
                                 can_ask_user = True)
             
     # 初始化 queryLoop 循环的运行状态
@@ -78,7 +87,7 @@ def create_master_runtime(history: List,
         state = agent_state,
         memory_policy = memoryPolicy,
         workspace = config.Config().get_path_config("project_path"),
-        session_id = None,
+        session_id = session_id,
         events = events,
         interaction = interaction,
     )
@@ -103,14 +112,29 @@ def master_agent():
     """
 
     # 初始化历史记录
+    from team.runtime import TeamRuntime
+    from tools.team import TEAM_MASTER_TOOLS, bind_team_handlers
+
     history = []
     # 初始化上下文
     context = builtin.update_context({})
 
+    current_config = config.Config()
+    workspace = current_config.get_path_config("project_path")
+    session_id = uuid4().hex[:8]
+    team_runtime = TeamRuntime(
+        workspace / ".agents" / "runs" / session_id / "tasks",
+        session_id=session_id,
+    )
+    team_handlers = bind_team_handlers(team_runtime)
+
     runtime = create_master_runtime(history, 
                                     context,
                                     events=CliEventSink(),
-                                    interaction=CliInteraction())
+                                    interaction=CliInteraction(),
+                                    session_id=session_id,
+                                    additional_tools=TEAM_MASTER_TOOLS,
+                                    additional_tool_handlers=team_handlers)
 
     # 告知用户系统信息
     runtime.events.emit(

@@ -1,10 +1,16 @@
 """Team-level use case 的 orchestration dependency boundary。"""
 
+from typing import TYPE_CHECKING
+
 from tools.task_system import TaskStore
 
+from .contracts import MemberRecord
 from .lifecycle import LifecycleManager
 from .messaging import MessageBus
 from .registry import MemberRegistry
+
+if TYPE_CHECKING:
+    from core.runtime import AgentRuntime
 
 
 class TeamCoordinator:
@@ -22,3 +28,16 @@ class TeamCoordinator:
         self.message_bus = message_bus
         self.task_store = task_store
         self.lifecycle_manager = lifecycle_manager
+
+    def spawn_teammate(
+        self,
+        *,
+        parent_runtime: "AgentRuntime",
+        agent_name: str,
+    ) -> MemberRecord:
+        """将 spawn use case 委托给唯一 lifecycle 入口。"""
+
+        return self.lifecycle_manager.spawn(
+            parent_runtime=parent_runtime,
+            agent_name=agent_name,
+        )

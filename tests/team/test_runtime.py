@@ -18,6 +18,7 @@ class ExplodingRuntimeFactory:
 def test_team_runtime_composes_one_shared_instance_of_each_service(tmp_path):
     runtime = TeamRuntime(
         tmp_path / "tasks",
+        session_id="session-1",
         runtime_factory=ExplodingRuntimeFactory,
     )
 
@@ -27,8 +28,10 @@ def test_team_runtime_composes_one_shared_instance_of_each_service(tmp_path):
     assert isinstance(runtime.lifecycle_manager, LifecycleManager)
     assert isinstance(runtime.coordinator, TeamCoordinator)
     assert runtime.task_store.directory == tmp_path / "tasks"
+    assert runtime.session_id == "session-1"
     assert runtime.lifecycle_manager.member_registry is runtime.member_registry
     assert runtime.lifecycle_manager.runtime_factory is ExplodingRuntimeFactory
+    assert runtime.lifecycle_manager.session_id == "session-1"
     assert runtime.coordinator.member_registry is runtime.member_registry
     assert runtime.coordinator.message_bus is runtime.message_bus
     assert runtime.coordinator.task_store is runtime.task_store

@@ -1,5 +1,6 @@
 """Agent Team 的共享运行时与核心契约。"""
 
+from .agent import TeamAgent
 from .contracts import (
     DuplicateMemberError,
     InvalidMemberTransitionError,
@@ -7,6 +8,7 @@ from .contracts import (
     MemberNotFoundError,
     MemberRecord,
     MemberState,
+    SpawnError,
     TeamError,
     TransitionSource,
     UnauthorizedMemberOperationError,
@@ -29,9 +31,11 @@ __all__ = [
     "MemberState",
     "MessageBus",
     "TeamCoordinator",
+    "TeamAgent",
     "TeamError",
     "TeamRuntime",
     "TransitionSource",
+    "SpawnError",
     "UnauthorizedMemberOperationError",
     "UnregisterReason",
 ]

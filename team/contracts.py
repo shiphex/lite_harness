@@ -71,3 +71,7 @@ class InvalidMemberTransitionError(TeamError):
 
 class UnauthorizedMemberOperationError(TeamError):
     """调用来源或 unregister 用途不符合契约时抛出。"""
+
+
+class SpawnError(TeamError):
+    """TeamAgent spawn transaction 失败时抛出。"""

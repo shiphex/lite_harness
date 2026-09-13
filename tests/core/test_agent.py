@@ -46,11 +46,19 @@ def test_create_master_runtime_builds_policy_and_state(monkeypatch, tmp_path):
         {},
         events=events,
         interaction=interaction,
+        session_id="master-session",
+        additional_tools=[{"name": "spawn_teammate"}],
+        additional_tool_handlers={"spawn_teammate": lambda context: "spawned"},
     )
 
     assert runtime.policy.model["model_name"] == "configured-model"
     assert runtime.policy.fallback_model["model_name"] == "fallback-model"
-    assert runtime.policy.tools_list == [{"name": "demo_tool"}]
+    assert runtime.policy.tools_list == [
+        {"name": "demo_tool"},
+        {"name": "spawn_teammate"},
+    ]
+    assert set(runtime.policy.tool_handler) == {"demo_tool", "spawn_teammate"}
+    assert runtime.session_id == "master-session"
     assert runtime.state.current_model == runtime.policy.model
     assert runtime.state.max_output_tokens == 1234
     assert runtime.state.recovery_count == 0
@@ -116,6 +124,12 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
         return runtime
 
     monkeypatch.setattr(agent, "create_master_runtime", fake_create_runtime)
+    monkeypatch.setattr(agent.config, "Config", _config(tmp_path))
+    monkeypatch.setattr(
+        agent,
+        "uuid4",
+        lambda: SimpleNamespace(hex="session12345678"),
+    )
     monkeypatch.setattr(agent, "query_loop", fake_query_loop)
     monkeypatch.setattr(agent.hook, "make_hook_context", lambda current_runtime: "hook-context")
     monkeypatch.setattr(
@@ -128,7 +142,18 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
 
     assert captured["runtime"] is runtime
     assert len(begin_run_calls) == 1
-    assert set(created_with) == {"events", "interaction"}
+    assert created_with["session_id"] == "session1"
+    assert [tool["name"] for tool in created_with["additional_tools"]] == [
+        "spawn_teammate"
+    ]
+    assert set(created_with["additional_tool_handlers"]) == {"spawn_teammate"}
+    assert set(created_with) == {
+        "events",
+        "interaction",
+        "session_id",
+        "additional_tools",
+        "additional_tool_handlers",
+    }
     assert runtime.state.messages[0] == {"role": "user", "content": "hello"}
     assert hook_calls == [
         (HookEvent.USER_PROMPT_SUBMIT, "hook-context", ("hello",)),
@@ -161,6 +186,7 @@ def test_master_agent_accepts_exit_inputs(monkeypatch, exit_input):
         "create_master_runtime",
         lambda history, context, **kwargs: runtime,
     )
+    monkeypatch.setattr(agent.config, "Config", _config(Path.cwd()))
     monkeypatch.setattr(agent.builtin, "update_context", lambda *args, **kwargs: {})
 
     agent.master_agent()
