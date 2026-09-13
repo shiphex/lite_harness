@@ -57,12 +57,18 @@ LifecycleManager 需要的函数：
 
 ## 2.5 MemberRegistry Protocol
 MemberRegistry 需要的函数：
-- register()
-- unregister()
-- get()
-- get_MemberState()
-- list()
-- 受控状态转换操作（具体名称和签名延后到 Phase 1）
+- `register(agent_id: str, agent_name: str) -> MemberRecord`
+- `unregister(agent_id: str, *, reason: UnregisterReason) -> MemberRecord | None`
+- `get(agent_id: str) -> MemberRecord`
+- `get_member_state(agent_id: str) -> MemberState`
+- `list() -> tuple[MemberRecord, ...]`
+- `transition(agent_id: str, event: MemberEvent, *, source: TransitionSource) -> MemberRecord`
+
+相关 contract types：
+- `MemberRecord` 是 immutable member snapshot，以 `agent_id` 为 registry key，并保存 `agent_name` 与 `MemberState`。
+- `MemberState`：`STARTING`、`IDLE`、`BUSY`、`WAITING`、`STOPPED`、`FAILED`。
+- `MemberEvent` 与 `TransitionSource` 对应 `03_runtime.md` §1.2 的状态机和触发权限表。
+- `UnregisterReason` 仅包含 `SPAWN_ROLLBACK` 与 `TEAM_RELEASE`。
 
 受控状态转换操作必须：
 - 只接受授权模块发起的 transition 请求或状态报告。
@@ -73,6 +79,8 @@ MemberRegistry 需要的函数：
 `unregister()` 仅允许用于：
 - spawn 发布成功前的 rollback。
 - TeamRuntime 最终释放。
+
+`SPAWN_ROLLBACK` 只能移除 `STARTING` record；`TEAM_RELEASE` 表示 TeamRuntime 最终释放边界。对不存在 member 的 unregister 保持幂等。
 
 MemberRegistry 不应存在的函数：
 - spawn()

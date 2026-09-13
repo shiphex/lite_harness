@@ -1,10 +1,16 @@
 # TASK-02 Completion Report
 
-Status: Awaiting Human Review / In Progress
+Status: Archived / Non-authoritative
 
 Task: Team Core Contract Implementation & Composition
 
 Baseline: `e5ff191365cd607265cf36d7a2dc1de3075e3dcd`
+
+Outcome: Human reviewed; accepted after Finding-01 correction
+
+Source of Truth: `../04_contracts.md`、`../07_test_plan.md`、`../08_tasks.md`
+
+Review: [`TASK-02_human-review.md`](TASK-02_human-review.md)
 
 ## Implemented
 
@@ -49,4 +55,4 @@ None。
 
 ## Outcome
 
-实现与验证已完成。Human Review 接受本报告前，TASK-02 保持 **In Progress**，不得标记 Done / Phase 1 complete。
+实现与验证已完成；最终审查结论与当前任务状态分别见 `TASK-02_human-review.md` 和 `../08_tasks.md`。

@@ -18,7 +18,7 @@ Optional Real-model E2E Smoke 在 Phase 6 完成后执行，不阻塞 MVP。
 | status | Phase   | 目的    | 典型验证 | 对应任务 |
 | ------- | ------- | ------- | ------- | ------- |
 | [√] | Phase 0 | Existing Code Gap Analysis       | Spec 与现有 Runtime/Task/Tool 对齐            | Existing Code Gap Analysis |
-| [ ] | Phase 1 | Team contract implementation / composition | 落实已接受的 Contract，TeamRuntime 建立共享服务 | Team Core Contract Implementation & Composition |
+| [√] | Phase 1 | Team contract implementation / composition | 落实已接受的 Contract，TeamRuntime 建立共享服务 | Team Core Contract Implementation & Composition |
 | [ ] | Phase 2 | Spawn vertical slice             | Master → Coordinator → Lifecycle → Registry  | Spawn Vertical Slice |
 | [ ] | Phase 3 | Messaging vertical slice         | TeamAgent → MailboxHandle → MessageBus       | Messaging Vertical Slice |
 | [ ] | Phase 4 | Task collaboration               | MasterAgent + existing TaskStore + TeamAgent | Task Collaboration |
@@ -28,18 +28,19 @@ Optional Real-model E2E Smoke 在 Phase 6 完成后执行，不阻塞 MVP。
 
 # Current Facts
 
-> TASK-01 已使用独立代码证据验证下列事实，Human Review 已接受验证结果。
+> TASK-01 与 TASK-02 已使用独立代码证据验证下列事实，Human Review 已接受验证结果。
 
-Validated against: `f90561fff98dcc86ec4261b38e6c32f04c9a9f96`
+Validated against: `70825632e033e64778d5373d6d8da2b619a56ad8`
 
 | ID | Status | Confirmed code fact | Evidence |
 | --- | --- | --- | --- |
-| CF-01 | `confirmed` | `AgentRuntime` 已存在。 | `f90561f/core/runtime.py:113` |
-| CF-02 | `confirmed` | 当前 MasterAgent 和 Subagent 均通过 `query_loop` 执行。 | `f90561f/core/agent.py:147`、`f90561f/tools/subagent.py:167` |
-| CF-03 | `confirmed` | `task_system` 已使用 JSON 持久化任务。 | `f90561f/tools/task_system.py:96`、`f90561f/tools/task_system.py:195`、`f90561f/tools/task_system.py:206` |
-| CF-04 | `confirmed` | `claim_task` / `complete_task` 已存在，但当前是绑定模块级全局 `TASKS` 的函数，尚未形成可直接注入 TeamRuntime 的实例协议。 | `f90561f/tools/task_system.py:243`、`f90561f/tools/task_system.py:330`、`f90561f/tools/task_system.py:352` |
-| CF-05 | `confirmed` | 当前目标分支中未发现 team-level member registry。 | `f90561f` repository tree；`MemberRegistry` symbol search：no matches |
-| CF-06 | `confirmed` | 当前目标分支中未发现 mailbox abstraction。 | `f90561f` symbol search；`MailboxHandle` / `MessageBus`：no matches |
+| CF-01 | `confirmed` | `AgentRuntime` 已存在。 | `7082563/core/runtime.py:113` |
+| CF-02 | `confirmed` | 当前 MasterAgent 和 Subagent 均通过 `query_loop` 执行。 | `7082563/core/agent.py:147`、`7082563/tools/subagent.py:167` |
+| CF-03 | `confirmed` | `task_system` 使用现有 `TaskStore` 与 JSON 文件持久化任务。 | `7082563/tools/task_system.py:49`、`7082563/tools/task_system.py:127`、`7082563/tools/task_system.py:201`、`7082563/tools/task_system.py:217` |
+| CF-04 | `confirmed` | task operations 已支持显式 `store=` 注入，未注入时动态使用全局 `TASKS`。 | `7082563/tools/task_system.py:247`、`7082563/tools/task_system.py:253`、`7082563/tools/task_system.py:367`、`7082563/tools/task_system.py:395` |
+| CF-05 | `confirmed` | `MemberRegistry` 已作为 MemberState 的 authoritative owner，通过受控 `transition()` 应用状态变化。 | `7082563/team/registry.py:65`、`7082563/team/registry.py:138` |
+| CF-06 | `confirmed` | `MessageBus` 已作为 team-scoped mailbox ownership shell 存在，尚未实现 messaging behavior。 | `7082563/team/messaging.py:4` |
+| CF-07 | `confirmed` | `TeamRuntime` 已独立组装并持有 MemberRegistry、MessageBus、TaskStore、LifecycleManager 与 TeamCoordinator。 | `7082563/team/runtime.py:14`、`7082563/team/runtime.py:23` |
 
 ## Accepted Design Constraints
 
@@ -56,7 +57,7 @@ Validated against: `f90561fff98dcc86ec4261b38e6c32f04c9a9f96`
 # TASK-02 Team contract implementation / composition
 
 Status:
-Ready
+Done / Phase 1 complete
 
 Goal: 
 落实 Contract、建立 TeamRuntime shared services composition（可以构造一个独立 TeamRuntime，它拥有正确的 team-scoped core services，但还没有实现 TeamAgent spawn、messaging 和 task collaboration）。
@@ -142,3 +143,4 @@ Design delta:
 | Task | Outcome | End commit | History |
 |---|---|---|---|
 | TASK-01 Existing Code Gap Analysis | Done / Phase1 GO | `f90561fff98dcc86ec4261b38e6c32f04c9a9f96` | _history/TASK-01_*.md |
+| TASK-02 Team Core Contract Implementation & Composition | Done / Phase 1 complete | `70825632e033e64778d5373d6d8da2b619a56ad8` | _history/TASK-02_*.md |
