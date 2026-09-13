@@ -160,3 +160,122 @@ Consequences
 - 暂时不实现 conversation session
 
 
+## ADR-007 Spawn commit 与 execution boundary
+
+Status:
+Accepted
+
+Context:
+Phase 2 需要区分“创建并发布 TeamAgent”与“为 TeamAgent 注入工作并执行”。如果 spawn 同时启动线程或调用模型，会提前引入 messaging、task collaboration 和 supervision 语义。
+
+Decision:
+- Spawn 的 commit point 是 member 经 MemberRegistry 从 STARTING 发布为 IDLE。
+- Spawn 只创建被动 TeamAgent execution wrapper，不启动后台线程、不立即调用模型。
+- TeamAgent 提供 `run(prompt)` 边界，并复用现有 AgentRuntime / `query_loop`。
+
+Alternatives:
+- Spawn 后立即执行模型：拒绝，会把创建与任务执行耦合并越过 Phase 2 边界。
+- Spawn 后启动常驻 worker：Deferred，等待 messaging / task collaboration 的驱动方式确定。
+- 发布被动 wrapper：接受。
+
+Consequences:
+- IDLE 表示 member 已发布可用，不表示已开始工作。
+- Phase 2 可以通过 fake loop 验证 execution boundary，而无需真实模型。
+
+Deferred:
+- `run` 的触发者、后台线程、fatal supervision 与 shutdown 分别留到 Phase 3～5。
+
+Review source: [_history/TASK-03_human-review.md DD-01](_history/TASK-03_human-review.md#dd-01)
+
+
+## ADR-008 Master session composition 与 TeamRuntime 绑定
+
+Status:
+Accepted
+
+Context:
+Master AgentRuntime 在启动时创建，而 TeamRuntime 是不同层次的 team composition context；需要在不把 Team 状态塞入 AgentRuntime 的前提下绑定 Master-only team tool。
+
+Decision:
+- 一个 Master session 对应一个 TeamRuntime composition context。
+- Master AgentRuntime 与 TeamRuntime 是 sibling，不相互拥有状态。
+- Master session composition scope 生成 session_id，并显式传给 Master AgentRuntime 与 TeamRuntime。
+- composition scope 持有 TeamRuntime，Master 的 bound spawn handler 引用 TeamRuntime。
+- `create_master_runtime()` 只提供通用 per-instance tool definition / handler 注入 seam，不感知 TeamRuntime。
+- TeamRuntime 在 Master session 创建时建立；第一次 spawn 不负责创建 TeamRuntime。
+
+Alternatives:
+- 在 AgentRuntime 增加 TeamRuntime 字段：拒绝，会合并不同 scope 的状态所有权。
+- 使用全局 TeamRuntime：拒绝，无法保证 session isolation。
+- composition-scope sibling + bound handler：接受。
+
+Consequences:
+- TeamAgent 与 Master 共享 session_id，TeamRuntime 的 TaskStore 使用 session-scoped 路径。
+- `spawn_teammate` 只需注入 Master instance，不污染通用工具集合。
+
+Deferred:
+None
+
+Review source: [_history/TASK-03_human-review.md DD-02](_history/TASK-03_human-review.md#dd-02)
+
+
+## ADR-009 TeamAgent Phase-2 runtime policy
+
+Status:
+Accepted
+
+Context:
+TeamAgent 需要可由统一 `query_loop` 使用的独立 AgentRuntime，但正式的 memory、tool、event routing 与 turn policy 尚未进入对应能力阶段。
+
+Decision:
+- TeamAgent 有独立 AgentRuntime、state、history、agent_id 与 runtime paths。
+- TeamAgent 与 Master 共享 session_id 和当前 workspace，不直接与用户交互。
+- Phase 2 默认复制 parent model / fallback model，使用 `NonInteractiveInteraction` 与 `NullEventSink`。
+- Phase 2 暂用 READ_ONLY memory（namespace `master`）、`read_file` / `glob` / `load_skill` 和 `max_turns=30`。
+
+Alternatives:
+- 复用 Master AgentRuntime/state：拒绝，会破坏每个 Agent 独立状态所有权。
+- 在 Phase 2 定义完整 profile / event routing：拒绝，超出当前 vertical slice。
+- 使用最小 provisional policy：接受。
+
+Consequences:
+- Phase 2 可安全 fake-test TeamAgent execution，不发生用户交互或 child-output routing。
+- provisional 值不得被提升为长期 architecture invariant。
+
+Deferred:
+- 正式 memory namespace、tool capability、event routing 与 max-turn policy 在真正进入执行能力时重新裁决。
+
+Review source: [_history/TASK-03_human-review.md DD-03](_history/TASK-03_human-review.md#dd-03)
+
+
+## ADR-010 Spawn ownership 与 rollback
+
+Status:
+Accepted
+
+Context:
+RuntimeFactory 创建 AgentRuntime 时会创建 runtime directories，但 AgentRuntime 当前没有 `destroy()` / `close()` contract。需要明确创建入口、ownership、commit 和可验证的 rollback 范围。
+
+Decision:
+- 调用方向固定为 Tool → TeamCoordinator → LifecycleManager → RuntimeFactory。
+- 只有 LifecycleManager 创建 TeamAgent AgentRuntime，并持有 TeamAgent wrapper / AgentRuntime 的逻辑 ownership。
+- 创建顺序为 AgentRuntime → wrapper → Registry STARTING → Lifecycle ownership → SPAWN_SUCCESS → IDLE commit。
+- commit 前失败时逆序释放逻辑 ownership；已注册 STARTING record 使用 `SPAWN_ROLLBACK` 移除。
+- `SpawnError(TeamError)` 表示 spawn domain failure。
+- rollback 不承诺删除 RuntimeFactory 已创建的 filesystem diagnostic artifacts。
+
+Alternatives:
+- Coordinator 或 TeamAgent 直接创建 runtime：拒绝，会形成多个 lifecycle 入口。
+- 要求删除 runtime directories：拒绝，当前缺少通用 runtime destruction contract。
+- Lifecycle 单点创建与逻辑 rollback：接受。
+
+Consequences:
+- 成功结果是使用 RuntimeFactory 实际 identity 的 IDLE MemberRecord。
+- 失败后 Registry 与 LifecycleManager 均不保留本次未发布 member / worker。
+
+Deferred:
+None
+
+Review source: [_history/TASK-03_human-review.md DD-04](_history/TASK-03_human-review.md#dd-04)
+
+

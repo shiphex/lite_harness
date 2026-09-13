@@ -30,33 +30,35 @@ TaskStore
 ## 1.1 team 架构设计
 
 ``` text
-                     TeamRuntime
+              Master session composition scope
    ┌──────────────────────────────────────────────────┐
+   │ shared session_id / workspace                    │
    │                                                  │
-   │         composition root / team context          │
-   │                       │                          │
-   |       ┌───────────────┼─────────────────┐        │
-   |       ▼               ▼                 ▼        │
-   | TeamCoordinator   MemberRegistry    MessageBus   │
-   |       │                                          │
-   |       ├──────────────→ TaskStore                 │
-   |       │                                          │
-   |       └──────────────→ LifecycleManager          │
-   └──────────────────────────────────────────────────┘
-                           │
-            ┌──────────────┼──────────────┐
-            ▼              ▼              ▼
-      MasterAgent       TeamAgent A     TeamAgent B
-      AgentRuntime      AgentRuntime    AgentRuntime
-            │              │              │
-            └──────────────┼──────────────┘
-                           ▼
-                       run_turn()
-                           │
-                           ▼
-                       query_loop()
+   │ MasterAgent / AgentRuntime      TeamRuntime      │
+   │              │                    │              │
+   │              │ bound tool handler │              │
+   │              └───────────────────→│              │
+   │                                   ├ TeamCoordinator
+   │                                   ├ MemberRegistry
+   │                                   ├ MessageBus   │
+   │                                   ├ TaskStore    │
+   │                                   └ LifecycleManager
+   └───────────────────────────────────────┬──────────┘
+                                           │ owns
+                              ┌────────────┴────────────┐
+                              ▼                         ▼
+                   TeamAgent wrapper A       TeamAgent wrapper B
+                   AgentRuntime A             AgentRuntime B
+                              │                         │
+                              └────────────┬────────────┘
+                                           ▼
+                                       query_loop()
 
 ```
+
+- 一个 Master session 对应一个 TeamRuntime composition context。
+- Master AgentRuntime 与 TeamRuntime 是同一 composition scope 中的 sibling，二者不相互持有或合并状态；Master 的 bound team-tool handler 引用 TeamRuntime。
+- composition scope 生成一个 `session_id` 并显式传给 Master AgentRuntime 与 TeamRuntime。TeamAgent 具有独立 AgentRuntime、state、history、agent_id 与 runtime paths，但与 Master 共享 `session_id` 和当前 workspace。
 
 # 2. 模块边界设计
 
@@ -76,6 +78,8 @@ TeamCoordinator MemberRegistry      MessageBus
 - TeamRuntime = 一支 team 的运行环境和依赖集合
 - TeamRuntime 是 team composition root，负责组装并持有 team-scoped shared services；这些服务可以由 TeamRuntime 直接持有，也可以通过其组装关系间接持有。
 - TeamRuntime 与 AgentRuntime 相互独立：前者属于 Team，后者属于单个 Agent，不得合并两者的状态或职责。
+- TeamRuntime 在 Master session composition 时即创建；第一次 `spawn_teammate` 只创建 member，不负责延迟创建 TeamRuntime。
+- Master team tool 通过 per-instance bound handler 连接 TeamRuntime；通用 `create_master_runtime()` 只提供工具定义/handler 注入接缝，不感知 TeamRuntime。
 - TeamRuntime 的具体代码落点不是架构约束，由 Phase 1 按现有 package convention 和单一职责选择最小落点。
 - Coordinator = orchestration / use-case 层，负责协调，不负责实现所有东西
 - TaskStore：共享任务存储，用于存储和管理团队任务(create_task、claim_task、update_task、get_task、list_tasks)，底层复用已有 task_system；每个 TeamRuntime 使用独立的 team-scoped TaskStore。
@@ -99,6 +103,8 @@ Agent
 ```
 - Memory 属于 AgentRuntime。Agent Team 不引入新的记忆模型。
 - Identity 属于 AgentRuntime。由 AgentRuntime 初始化(session_id、agent_name、agent_id)。
+- TeamAgent 是被动 execution wrapper，持有既有 AgentRuntime 并以 `run(prompt)` 进入统一 `query_loop`；spawn 不启动线程，也不立即调用模型。
+- TeamAgent 不直接与用户交互。Phase 2 的工具、memory、event sink 与 max-turn 配置只是可替换机制，不是长期 architecture invariant。
 
 
 ## 2.3 Mailbox 边界设计
@@ -125,7 +131,8 @@ LifecycleManager 什么时候销毁 TeamAgent？
 关于 Team 中 Agent 状态及生命周期的管理分工： 
 ``` text
 LifecycleManager
-    管 worker 生命周期
+    管 TeamAgent wrapper / AgentRuntime 的逻辑生命周期与可达性
+    是 TeamAgent AgentRuntime 的唯一创建入口
 
 MemberRegistry
     是 team-visible member metadata / MemberState 的唯一 authoritative owner
@@ -136,6 +143,8 @@ MemberRegistry
 授权模块
     通过受控状态转换接口请求或报告 transition
 ```
+
+Phase 2 中，LifecycleManager 创建 AgentRuntime 与被动 TeamAgent wrapper，完成 Registry `STARTING → IDLE` 发布事务，并在 commit 前失败时逆序释放逻辑 ownership。RuntimeFactory 已创建的诊断目录不属于当前 cleanup contract。
 
 ## 2.5 MemberRegistry 边界设计
 
@@ -158,8 +167,8 @@ MemberRegistry
 ## 2.6 边界设计列表
 | Module | Responsibilities | Must NOT |
 |---|---|---|
-| TeamCoordinator | 编排 use case、协调 shared services | 保存 mailbox、直接构造 runtime、调用 LLM |
-| LifecycleManager | spawn/shutdown/teardown/cleanup | 任务调度、消息路由、业务推理 |
+| TeamCoordinator | 编排 use case、协调 shared services；将 spawn 委托给 LifecycleManager | 保存 mailbox、直接构造 runtime、持有 worker、调用 LLM |
+| LifecycleManager | spawn/shutdown/teardown/cleanup；持有 TeamAgent wrapper / AgentRuntime 的逻辑 ownership | 任务调度、消息路由、业务推理 |
 | MemberRegistry | member metadata/state | spawn、message、task、LLM |
 | MessageBus | mailbox ownership、routing | 调用 AgentRuntime、任务调度、Agent lifecycle |
 | TaskStore | task CRUD/state/dependency | 选择“最合适 Agent”、创建 Agent、发消息 |

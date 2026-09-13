@@ -34,8 +34,8 @@ E2E smoke:
 
 
 # 3. Failure Tests
-- [ ] F-SPAWN-01 → test_spawn_runtime_failure_rolls_back
-- [ ] F-SPAWN-02 → test_register_failure_destroys_runtime
+- [ ] F-SPAWN-01 → runtime creation failure returns `SpawnError` and leaves no member / lifecycle-owned TeamAgent
+- [ ] F-SPAWN-02 → wrapper、register、publication 或 commit failure reverse-cleans ownership；STARTING record uses `SPAWN_ROLLBACK`
 - [ ] F-MSG-01 → test_send_to_unknown_member_rejected
 - [√] F-STATE-01 → test_invalid_member_transition_rejected_without_state_change
 
@@ -51,10 +51,10 @@ TeamAgent communication 必须经过 MailboxHandle / MessageBus boundary，
 禁止直接访问其他 Agent 或 mailbox storage。
 
 - [ ] ARCH-03:
-Agent creation 入口必须经过 LifecycleManager
+TeamAgent AgentRuntime creation 入口必须经过 LifecycleManager；Coordinator、TeamAgent 与 team tool 不得调用 RuntimeFactory
 
 - [ ] ARCH-04:
-全部 TeamAgent 使用 AgentRuntime / query_loop 执行任务
+全部 TeamAgent 使用既有 AgentRuntime；`TeamAgent.run(prompt)` 默认进入既有 `query_loop`
 
 - [√] ARCH-05:
 TeamRuntime 是独立的 team composition root，不并入 AgentRuntime；team-scoped shared services 由 TeamRuntime 组装并持有。
@@ -67,6 +67,8 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 - [√] STORE-02 未显式注入 store 的现有工具路径继续使用全局 `TASKS`，原有行为保持兼容
 - [√] REGISTRY-01 所有 MemberState transition 均经过 MemberRegistry 的受控入口
 - [√] REGISTRY-02 `unregister` 仅可用于 spawn 发布前 rollback 或 TeamRuntime 最终释放
+- [ ] SPAWN-01 Master tool → TeamCoordinator → LifecycleManager → RuntimeFactory → MemberRegistry 的整链 fake-runtime 测试返回 IDLE member
+- [ ] MASTER-TOOL-01 `spawn_teammate` 只通过 per-instance binding 暴露给 Master，不进入通用 / Subagent / TeamAgent tool set
 
 # 4.3 成功标准
 `doc\features\agent team\01_problem.md` 中的 `# 4. Success Criteria`
@@ -76,9 +78,9 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 # 5. Traceability Matrix
 |state| Requirement | Architecture | Contract | Failure | ADR | Test | Task |
 |---|---|---|---|---|---|---|---|
-| [ ] | SC-01 spawn | architecture 2.4/2.5 | contract 2.4/2.5 | F-SPAWN-01/02 | ADR-001/002 | STATE-01/REGISTRY-02 | - |
-| [ ] | SC-02 统一 AgentRuntime / query_loop | architecture 1.1/2.2 | AgentRuntime existing contract（如果不在 Agent Team 文档，可写 existing runtime） | - | - | ARCH-04 | - |
+| [ ] | SC-01 spawn | architecture 1.1/2.1/2.4/2.5 | contract 2.4/2.5/3.1/3.3 | F-SPAWN-01/02 | ADR-001/002/007/008/010 | STATE-01/REGISTRY-02/SPAWN-01/MASTER-TOOL-01 | TASK-03 |
+| [ ] | SC-02 统一 AgentRuntime / query_loop | architecture 1.1/2.2 | contract 2.6 | - | ADR-007/009 | ARCH-04 | TASK-03 |
 | [ ] | SC-03 messaging | architecture 2.3 | contract 2.3 | F-MSG-01 | ADR-004/006 | - | - |
-| [ ] | SC-04 lifecycle entry | architecture 2.4/2.5 | contract 2.4/2.5 | F-STOP-01/F-STATE-01 | ADR-002/005 | STATE-03/04/06/07、ARCH-03、REGISTRY-01/02 | - |
+| [ ] | SC-04 lifecycle entry | architecture 2.4/2.5 | contract 2.4/2.5 | F-SPAWN-01/02、F-STOP-01/F-STATE-01 | ADR-002/005/010 | STATE-03/04/06/07、ARCH-03、REGISTRY-01/02 | TASK-03 / TASK-06 |
 | [ ] | SC-05 no cross-module state mutation | architecture 2.3/2.5 | contract 2.2/2.3/2.5 | F-MSG-01/02、F-STATE-01 | ADR-002/003/004 | ARCH-02/06、STORE-01/02、REGISTRY-01 | - |
 

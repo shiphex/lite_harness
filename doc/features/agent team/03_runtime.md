@@ -4,38 +4,57 @@
 ``` text
 MasterAgent
     │
-    │ team.spawn(...)
+    │ spawn_teammate(agent_name)
     ▼
-Team Tool
+Master-only Team Tool (bound to TeamRuntime)
     │
     ▼
 TeamCoordinator
     │
-    │ spawn request
+    │ spawn_teammate(parent_runtime, agent_name)
     ▼
 LifecycleManager
     │
-    ├── create AgentRuntime
-    │
-    └── MemberRegistry.register(runtime metadata)
+    ├── RuntimeFactory.create(...) → AgentRuntime
+    ├── create passive TeamAgent wrapper
+    ├── MemberRegistry.register(actual runtime metadata) → STARTING
+    ├── retain wrapper / runtime ownership
+    └── MemberRegistry.transition(SPAWN_SUCCESS) → IDLE (commit)
 ```
 
-注意：禁止 TeamAgent 创建 AgentRuntime 实例。
+注意：只有 LifecycleManager 可以创建 TeamAgent 使用的 AgentRuntime。spawn 的 commit point 是 member 成功发布为 IDLE；spawn 本身不启动后台线程、不注入 prompt，也不调用模型。
 
 
 关键 alternate flow：
 ``` text
 spawn
-├ success → register → IDLE
-└ failure(spawn 发布成功前) → rollback / unregister → no member
+├ success → runtime → wrapper → STARTING → owned → IDLE commit
+└ failure(commit 前)
+   ├ reverse cleanup lifecycle-owned wrapper / runtime references
+   ├ STARTING record → unregister(reason=SPAWN_ROLLBACK)
+   └ no member / no lifecycle-owned worker
 
 详见 F-SPAWN-01 / F-SPAWN-02
 ```
 
+当前 AgentRuntime 没有 `destroy()` / `close()` contract，因此 rollback 只保证逻辑资源与 ownership 清理；RuntimeFactory 已创建的 filesystem diagnostic artifacts 可以保留。
+
+TeamAgent 的 Phase-2 execution boundary：
+
+``` text
+TeamAgent.run(prompt)
+    → USER_PROMPT_SUBMIT hook
+    → append prompt to its own runtime state/history
+    → AgentRuntime.begin_run()
+    → existing query_loop(AgentRuntime)
+```
+
+谁触发 `run`、是否需要后台线程、以及执行期间的 MemberState 协调，延后到 Phase 3～5；Phase 2 只用 fake loop 验证该边界。
+
 ## 1.2 单个 team agent 生命周期示例
 ``` text
 STARTING
-   ↓ success
+   ↓ spawn_success / commit
 IDLE
    ↓
 BUSY ↔ WAITING
@@ -80,6 +99,8 @@ team agent 的 State Machine 转移表：
 | fatal_runtime_error | LifecycleManager/runtime supervisor |
 
 表中的 Authority 表示谁可以请求或报告 transition；MemberRegistry 是唯一实际校验、应用并保存 MemberState 的 authoritative owner。所有状态变化必须通过其受控状态转换接口，非法 transition 必须被拒绝且保持原状态不变。
+
+`STARTING` record 由 `register()` 创建；只有 LifecycleManager 可以提交 `spawn_success`。IDLE 表示 spawn 已完成并可被后续能力使用，不表示 TeamAgent 已开始执行任务。
 
 正常 shutdown 后的 STOPPED record，以及 fatal runtime error 后的 FAILED record，在 TeamRuntime 生命周期结束前必须仍可通过 MemberRegistry 查询。`unregister` 不属于正常 shutdown 或 fatal transition 的副作用，仅用于 spawn 发布成功前的 rollback，或 TeamRuntime 最终释放。
 
