@@ -64,7 +64,7 @@ Validated against: CF-01～CF-03 为 `70825632e033e64778d5373d6d8da2b619a56ad8`�
 # TASK-05 Task Collaboration
 
 Status:
-Preflight Complete / Awaiting Design Review
+Implementation Verified / Awaiting Completion Review
 
 Goal:
 在已发布的 TeamAgent、team-scoped TaskStore 与既有 query loop 之间建立 Master 主导的任务协作链路：Master 可查看任务并明确分配，目标 TeamAgent 可执行被分配的任务并提交结果。任务状态由现有 task_system 维护，成员状态由 MemberRegistry 维护；不引入 TeamAgent 自主取任务。
@@ -72,25 +72,26 @@ Goal:
 References:
 - REQUIREMENT: `01_problem.md` §2.1 Capability、§3 Non-goal、SC-02、SC-05～SC-07
 - ARCH / RUNTIME: `02_architecture.md` §2.1～2.2、`03_runtime.md` §1.2～1.3
-- CONTRACT / FAILURE: `04_contracts.md` §2.2 / §3.1～3.3、`05_failures.md` F-TASK-01 / F-STATE-01
-- ADR / TEST: `06_decisions.md` ADR-003 / ADR-006 / ADR-007 / ADR-009、`07_test_plan.md` STORE-01～02 / REGISTRY-01 / ARCH-04 / ARCH-06
+- CONTRACT / FAILURE: `04_contracts.md` §2.2 / §3.1～3.3、`05_failures.md` F-TASK-01～05 / F-STATE-01
+- ADR / TEST: `06_decisions.md` ADR-003 / ADR-006 / ADR-007 / ADR-009 / ADR-012、`07_test_plan.md` STORE-01～02 / REGISTRY-01 / ARCH-04 / ARCH-06 / COLLAB-01～08
 - BASELINE: TASK-04 验收见 [`_history/TASK-04_completion-review.md`](_history/TASK-04_completion-review.md)
 
-Preconditions:
-- Phase 3 的被动消息收发已验收；TeamAgent 的 `run(prompt)` 可进入既有 query loop，但当前没有任务分配或执行驱动。
+Baseline preconditions:
+- Phase 3 的被动消息收发已验收；实施 TASK-05 前 TeamAgent 的 `run(prompt)` 可进入既有 query loop，但没有任务分配或执行驱动。
 - TaskStore 已能按 TeamRuntime 隔离，并允许现有 task-system operation 显式注入 store；旧的全局 `TASKS` 工具路径保持兼容。
 
 Scope:
-- 预检仅核对 Master 看板读取、显式分配、TeamAgent 执行与完成反馈所需的最小接口、状态转换、失败恢复和测试；不修改行为代码。
-- 不引入 Scheduler、自主领取、worktree、conversation session、shutdown / teardown 或真实模型 smoke；这些能力不因 TASK-05 预检视为已接受。
+- 实施 Master 团队任务创建、看板、显式分配/续跑，TeamAgent 的团队任务及现有工作区工具，同步执行和可观察的失败恢复。
+- 不引入 Scheduler、自主领取、worktree、conversation session、shutdown / teardown 或真实模型 smoke。
 
-Design review pending:
-- [`_history/TASK-05_preflight.md`](_history/TASK-05_preflight.md) 提出 DD-01～DD-05：任务身份与绑定、执行触发、工具权限、并发领取及失败恢复。裁决前不传播提案到 01～07，也不实现依赖这些裁决的代码。
-- [`Human_Review.md`](Human_Review.md) 是当前待审阅稿；Phase 4、SC-02 与新增任务检查项保持未完成。
+Design accepted / completion pending:
+- 已接受 DD-01～DD-05 及补充裁决归档于 [`_history/TASK-05_human-review.md`](_history/TASK-05_human-review.md)；当前 [`Human_Review.md`](Human_Review.md) 是基于 [`_history/TASK-05_completion.md`](_history/TASK-05_completion.md) 的待完成审阅稿。
+- Phase 4、SC-02 与新增检查项保持未完成；待完成审阅接受后才可勾选。
 
-Verify after acceptance and implementation:
-- 使用 fake runtime / fake loop 验证 Master 查看与分配、目标 TeamAgent 的执行和任务完成；任务与成员状态分别经过 TaskStore / MemberRegistry 的授权入口。
-- 覆盖不存在或不可用成员、任务不存在、依赖未完成、重复或并发领取、执行失败与跨 TeamRuntime 隔离；全量已勾选回归保持通过。
+Verification evidence pending completion acceptance:
+- fake loop 与实际工具 executor 测试覆盖 Master 查看/分配、TeamAgent 执行/完成、任务与成员状态授权入口、跨 team 隔离、冲突及恢复。
+- 实现提交：`aa28dae3d3c74bf74dd20ca77f395ce7bf2ff576`；设计裁决提交：`82b1d926bc141705c533832ef0544ed86e5c03d5`。
+- `.venv/Scripts/python.exe -B -m pytest -q -p no:cacheprovider`：309 passed；`git diff --check` exit 0。详见 [`_history/TASK-05_completion.md`](_history/TASK-05_completion.md)。
 
 # Completed Tasks
 

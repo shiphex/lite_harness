@@ -1,12 +1,25 @@
-# TASK-05 Design Review
+# TASK-05 Completion Review
 
-Status: Pending Human Review (Codex prepared; no design acceptance recorded)
+Status: Pending Human Review (Codex prepared; no completion acceptance recorded)
 
 Task: TASK-05 Task Collaboration
 
-Based on: [_history/TASK-05_preflight.md](_history/TASK-05_preflight.md)
+Based on: [_history/TASK-05_completion.md](_history/TASK-05_completion.md)
 
-Result: 待裁决 DD-01～DD-05。以下均为预检建议，不是已接受设计；Phase 4、SC-02 和新增测试项保持未完成。
+Result: 拟接受 TASK-05 的实现与验证证据；当前仅是 Codex 准备的完成审阅草案。Phase 4、SC-02 和新增测试项仍未勾选。
+
+Accepted design: [_history/TASK-05_human-review.md](_history/TASK-05_human-review.md)
+
+## 完成审阅依据
+
+- 以 `1bcadae` 为基线、由实现提交 `aa28dae3d3c74bf74dd20ca77f395ce7bf2ff576` 引入 Master 团队任务创建/看板/分配/续跑、TeamAgent 团队任务工具与同步执行；完成报告详列改动和范围。
+- 全量 `uv run python -m pytest -q` 为 309 passed；`uv run python -m compileall -q core team tools` 与 `git diff --check` 均 exit 0。独立代码审阅指出的残留领取、后台结果隔离和无效标题问题已补测试并修复。
+- 跨进程事务、共享 workspace 文件冲突、真实模型 smoke 与 shutdown/teardown 保留在 TASK-05 范围之外。
+
+## 待完成裁决
+
+1. 是否接受当前代码、文档和测试证据覆盖 TASK-05 / Phase 4，包括失败恢复与同进程 TaskStore 互斥？
+2. 若接受，只勾选有证据的 Phase 4、SC-02、F-TASK-01～05 与 COLLAB-01～08；Completed Tasks 引用真实报告提交，完成审阅及记录前不切换 TASK-06。
 
 ## 审阅依据
 
@@ -15,18 +28,16 @@ Result: 待裁决 DD-01～DD-05。以下均为预检建议，不是已接受设�
 - `0af6ca6` 中 TeamRuntime 已有独立 TaskStore，Coordinator / Master team tool 只有 spawn；通用任务 handler 使用全局 store，claim/complete 返回文本，缺少团队分配与执行绑定。
 - TASK-04 已受托完成审阅，见 [_history/TASK-04_completion-review.md](_history/TASK-04_completion-review.md)。本轮预检基线 `uv run python -m pytest -q` 为 293 passed；它不证明 Phase 4 已实现。
 
-## 待裁决设计差异
+## 已接受的设计裁决
 
-| ID | Codex 建议裁决 | 需要确认的影响 |
+| ID | 裁决 | 影响 |
 | --- | --- | --- |
-| DD-01 任务 owner 与身份 | Team 路径以实际 `agent_id` 为 owner；Coordinator 只接受本 TeamRuntime 中可接任务的 member，并对所有任务操作显式传入 team store。 | 现有全局工具仍沿用当前显示名称和默认 store，不将其解释为 Team 路径。 |
-| DD-02 分配与执行 | 一次 Master 显式分配同步执行一个 TeamAgent turn：校验、领取、Registry 转 BUSY、调用既有 `TeamAgent.run(prompt)`，不启动后台 worker。 | Master 工具调用将等待该 turn；执行返回而任务未完成时的状态须与 DD-05 一并裁决。 |
-| DD-03 工具权限 | Master 专属团队看板/详情/分配工具；TeamAgent 专属团队任务详情、创建/更新/完成工具，全部绑定 team store；TeamAgent 无自主 claim，完成者来自当前 runtime。 | 需确认最小工具清单与工具结果格式，避免误用全局 `TASKS`。 |
-| DD-04 冲突与原子性 | 在现有 task_system 内提供 typed team claim 结果，并序列化同一进程、同一 TaskStore 的领取；通用字符串接口维持兼容。 | 不承诺跨进程原子性；重复或并发领取必须有可观察冲突。 |
-| DD-05 部分成功 | 分别规定领取、成员 transition、执行、完成各步失败后的 task/member 状态；不报告虚假完成，不静默重置已领取任务。 | 确定可补偿步骤、失败后的可恢复入口，以及哪些 fatal 情况留给 Phase 5。 |
+| DD-01 任务 owner 与身份 | 接受：Team 路径以实际 `agent_id` 为 owner；Coordinator 只接受本 TeamRuntime 中可接任务的 member，并对所有任务操作显式传入 team store。 | 现有全局工具仍沿用当前显示名称和默认 store。 |
+| DD-02 分配与执行 | 接受：一次 Master 显式分配同步执行一个 TeamAgent turn：校验、领取、Registry 转 BUSY、调用既有 `TeamAgent.run(prompt)`，不启动后台 worker。 | 直接传入任务指令，不向 mailbox 重复通知。 |
+| DD-03 工具权限 | 接受并补足入口：Master 专属团队创建/看板/详情/分配/续跑工具；TeamAgent 专属团队详情/创建/更新/完成工具，全部绑定 team store；TeamAgent 无自主 claim，完成者来自当前 runtime。 | TeamAgent 还可使用现有 `bash`、`write_file`、`edit_file`；成功结果采用 JSON。 |
+| DD-04 冲突与原子性 | 接受：在现有 task_system 内提供 typed team claim 结果，并序列化同一进程、同一 TaskStore 的领取；通用字符串接口维持兼容。 | 不承诺跨进程原子性；重复或并发领取必须有可观察冲突。 |
+| DD-05 部分成功 | 接受：领取或执行后不静默退回 pending；异常或一轮结束未完成时保留原 owner 与 `in_progress`、成员 BUSY。Master 只可让原 owner 显式续跑，并可重试可恢复的状态转换。 | 部分成功返回实际 task/member 状态；不可恢复冲突明确报错，fatal supervision 留给 Phase 5。 |
 
-## 拟议实施与验收门槛
+## 审阅状态
 
-1. 仅在 DD-01～DD-05 获明确接受或修改裁决后，传播到相关 02～07、ADR、07 追踪矩阵及 `08_tasks.md`；新增测试与 Phase 4 保持未完成。
-2. 用 fake runtime / fake loop 验证 team-scoped 看板、显式分配、单次执行、owner 与状态一致性、跨 team 隔离、冲突和失败路径；保留全量已勾选回归。
-3. 完成报告及独立完成审阅接受前，不勾选 Phase 4、SC-02 或新增任务检查项。当前文件由 Codex 准备，尚无人工接受记录。
+以上设计裁决已由用户接受并归档；本文件只等待独立的完成审阅。只有用户或项目指定审阅者明确接受后，才能将本文件改为 `Accepted Review` 并更新完成状态。
