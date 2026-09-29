@@ -5,8 +5,9 @@ from typing import Any, TYPE_CHECKING
 
 import hook
 
-from .contracts import TeamError
+from .contracts import MemberEvent, TeamError, TransitionSource
 from .messaging import MailboxHandle
+from .registry import MemberRegistry
 
 if TYPE_CHECKING:
     from core.runtime import AgentRuntime
@@ -32,6 +33,14 @@ class TeamAgent:
         self.runtime = runtime
         self.mailbox_handle = mailbox_handle
         self._run_loop = run_loop
+        self.active_task_id: str | None = None
+
+    def report_task_finished(self, registry: MemberRegistry):
+        return registry.transition(
+            self.runtime.agent_id,
+            MemberEvent.TASK_FINISHED,
+            source=TransitionSource.TEAM_AGENT,
+        )
 
     def run(self, prompt: str):
         """把一次输入交给现有 query_loop，不创建第二套 Agent Loop。"""

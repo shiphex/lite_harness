@@ -7,6 +7,7 @@ from pathlib import Path
 import secrets
 import json
 import re
+from threading import RLock
 from .tool_class import ToolContext
 import config
 
@@ -17,6 +18,18 @@ TASK_ID_RE = re.compile(TASK_ID_PATTERN)
 
 class TaskError(ValueError):
     """可预期的任务工具错误。"""
+
+
+class TaskClaimConflict(TaskError):
+    """任务已被领取或不再处于待领取状态。"""
+
+
+class TaskDependencyBlocked(TaskError):
+    """任务仍有未完成依赖。"""
+
+
+class TaskCompletionConflict(TaskError):
+    """任务状态或完成者与领取记录不符。"""
 
 
 def _validate_task_id(task_id: str) -> str:
@@ -46,6 +59,12 @@ class Task:
     blockedBy: list[str] # 依赖的任务 ID 列表
 
 
+@dataclass(frozen=True)
+class TaskCompletion:
+    task: Task
+    unlocked_subjects: tuple[str, ...]
+
+
 class TaskStore:
 
     def __init__(self, directory: Path):
@@ -54,6 +73,7 @@ class TaskStore:
             directory (Path): 任务存储根目录
         """
         self.directory = directory
+        self._lock = RLock()
 
     def _root(self, create: bool = False) -> Path:
         """ 获取任务存储根目录
@@ -94,6 +114,10 @@ class TaskStore:
         return self._path(task_id).is_file()
     
     def create(self, subject: str, description: str) -> Task:
+        with self._lock:
+            return self._create_unlocked(subject, description)
+
+    def _create_unlocked(self, subject: str, description: str) -> Task:
         """ 创建任务
 
         Args:
@@ -105,6 +129,10 @@ class TaskStore:
             ValueError: 任务主题不能为空
         """
         # 数据预处理
+        if not isinstance(subject, str):
+            raise TaskError("任务主题必须是字符串")
+        if not isinstance(description, str):
+            raise TaskError("任务描述必须是字符串")
         subject = subject.strip()
         if not subject:
             raise TaskError("任务主题不能为空")
@@ -154,6 +182,12 @@ class TaskStore:
     def update_dependencies(self, 
                             task_id: str, 
                             add_blocked_by: list[str])-> Task:
+        with self._lock:
+            return self._update_dependencies_unlocked(task_id, add_blocked_by)
+
+    def _update_dependencies_unlocked(self,
+                                      task_id: str,
+                                      add_blocked_by: list[str]) -> Task:
         """ 更新任务依赖
         
         Args:
@@ -193,6 +227,10 @@ class TaskStore:
         return task
 
     def save(self, task: Task) -> None:
+        with self._lock:
+            self._save_unlocked(task)
+
+    def _save_unlocked(self, task: Task) -> None:
         """ 保存任务
         
         Args:
@@ -204,6 +242,10 @@ class TaskStore:
         )
 
     def load(self, task_id: str) -> Task:
+        with self._lock:
+            return self._load_unlocked(task_id)
+
+    def _load_unlocked(self, task_id: str) -> Task:
         """ 加载任务
         
         Args:
@@ -228,6 +270,10 @@ class TaskStore:
         return task
 
     def list(self) -> list[Task]:
+        with self._lock:
+            return self._list_unlocked()
+
+    def _list_unlocked(self) -> "list[Task]":
         """ 列出所有任务
         
         Returns:
@@ -378,18 +424,28 @@ def claim_task(
     Returns:
         str: 领取任务的确认信息
     """
-    task_store = _resolve_store(store)
-    task = load_task(task_id, store=task_store)
-    if task.status != "pending":
-        return f"任务 {task_id} 状态不是 pending，不能被领取"
-    dependencies = incomplete_dependencies(task, store=task_store)
-    if dependencies:
-        return f"任务 {task_id} 有未完成依赖 {dependencies}，不能被领取"
-    task.owner = owner
-    task.status = "in_progress"
-    task_store.save(task)
-    # print(f"  [claim] {task.subject} -> in_progress (owner: {owner})")
+    try:
+        task = claim_task_strict(task_id, owner, store=_resolve_store(store))
+    except (TaskClaimConflict, TaskDependencyBlocked) as exc:
+        return str(exc)
     return f"Claimed {task.id} ({task.subject})"
+
+
+def claim_task_strict(task_id: str, owner: str, *, store: TaskStore) -> Task:
+    """对一个 TaskStore 原子领取任务；冲突通过类型区分。"""
+    with store._lock:
+        task = load_task(task_id, store=store)
+        if task.status != "pending":
+            raise TaskClaimConflict(f"任务 {task_id} 状态不是 pending，不能被领取")
+        dependencies = incomplete_dependencies(task, store=store)
+        if dependencies:
+            raise TaskDependencyBlocked(
+                f"任务 {task_id} 有未完成依赖 {dependencies}，不能被领取"
+            )
+        task.owner = owner
+        task.status = "in_progress"
+        store.save(task)
+        return task
 
 
 def complete_task(
@@ -409,35 +465,48 @@ def complete_task(
     Returns:
         str: 完成任务的确认信息，以及解锁的任务主题列表
     """
-    task_store = _resolve_store(store)
-    task = load_task(task_id, store=task_store)
-    if task.status != "in_progress":
-        return f"任务 {task_id} 处于 {task.status} 状态，不能被完成"
-    if task.owner != owner:
-        return f"任务 {task_id} 属于 {task.owner} ，不属于 {owner}"
-
-    # 加载所有任务，检查是否有未完成依赖任务的可以开始
-    ready_before = {
-        candidate.id
-        for candidate in list_tasks(store=task_store)
-        if candidate.status == "pending"
-        and candidate.blockedBy     # 有依赖任务列表
-        and can_start(candidate.id, store=task_store)
-    }
-    task.status = "completed"
-    task_store.save(task)
-
-    unlocked = [candidate.subject for candidate in list_tasks(store=task_store)
-                if candidate.status == "pending" 
-                and candidate.blockedBy 
-                and candidate.id not in ready_before 
-                and can_start(candidate.id, store=task_store)]
-
-    # print(f"  [complete] {task.subject}")
-    messages = f"Completed {task.id} ({task.subject})"
-    if unlocked:
-        messages += f"\nUnlocked: {', '.join(unlocked)}"
+    try:
+        completion = complete_task_strict(task_id, owner, store=_resolve_store(store))
+    except TaskCompletionConflict as exc:
+        return str(exc)
+    messages = f"Completed {completion.task.id} ({completion.task.subject})"
+    if completion.unlocked_subjects:
+        messages += f"\nUnlocked: {', '.join(completion.unlocked_subjects)}"
     return messages
+
+
+def complete_task_strict(
+    task_id: str, owner: str, *, store: TaskStore
+) -> TaskCompletion:
+    """仅允许当前 owner 完成任务，并返回解锁的任务主题。"""
+    with store._lock:
+        task = load_task(task_id, store=store)
+        if task.status != "in_progress":
+            raise TaskCompletionConflict(
+                f"任务 {task_id} 处于 {task.status} 状态，不能被完成"
+            )
+        if task.owner != owner:
+            raise TaskCompletionConflict(
+                f"任务 {task_id} 属于 {task.owner} ，不属于 {owner}"
+            )
+        ready_before = {
+            candidate.id
+            for candidate in list_tasks(store=store)
+            if candidate.status == "pending"
+            and candidate.blockedBy
+            and can_start(candidate.id, store=store)
+        }
+        task.status = "completed"
+        store.save(task)
+        unlocked = tuple(
+            candidate.subject
+            for candidate in list_tasks(store=store)
+            if candidate.status == "pending"
+            and candidate.blockedBy
+            and candidate.id not in ready_before
+            and can_start(candidate.id, store=store)
+        )
+        return TaskCompletion(task, unlocked)
 
 
 # ------------------------ 外部接口函数 ------------------------

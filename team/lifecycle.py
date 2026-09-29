@@ -10,6 +10,7 @@ from core.runtime import AgentRuntime, RunPolicy, RuntimeFactory, state
 from event.interaction import NonInteractiveInteraction
 from event.sink import NullEventSink
 from tools.tool_handler import STANDARD_TOOLS_HANDLERS, STANDARD_TOOLS_LIST
+from tools.task_system import TaskStore
 
 from .agent import TeamAgent
 from .contracts import (
@@ -23,21 +24,32 @@ from .contracts import (
 from .registry import MemberRegistry
 from .messaging import MessageBus
 from .messaging_tools import TEAM_AGENT_MESSAGE_TOOLS, bind_message_handlers
+from .task_tools import TEAM_AGENT_TASK_TOOLS, bind_task_handlers
 
 
 _AGENT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
-_READ_ONLY_TOOL_NAMES = frozenset({"read_file", "glob", "load_skill"})
+_TEAM_TOOL_NAMES = frozenset(
+    {"read_file", "glob", "load_skill", "bash", "write_file", "edit_file"}
+)
 
 
-def _read_only_tools() -> tuple[list[dict], dict]:
+def _team_agent_tools() -> tuple[list[dict], dict]:
     definitions = [
         dict(tool)
         for tool in STANDARD_TOOLS_LIST
-        if tool.get("name") in _READ_ONLY_TOOL_NAMES
+        if tool.get("name") in _TEAM_TOOL_NAMES
     ]
+    for definition in definitions:
+        if definition["name"] == "bash":
+            definition["input_schema"] = {
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+                "additionalProperties": False,
+            }
     handlers = {
         name: STANDARD_TOOLS_HANDLERS[name]
-        for name in _READ_ONLY_TOOL_NAMES
+        for name in _TEAM_TOOL_NAMES
     }
     return definitions, handlers
 
@@ -53,12 +65,14 @@ class LifecycleManager:
         runtime_factory: type[RuntimeFactory] = RuntimeFactory,
         session_id: str | None = None,
         agent_factory: Callable[..., TeamAgent] = TeamAgent,
+        task_store: TaskStore | None = None,
     ):
         self.member_registry = member_registry
         self.message_bus = message_bus if message_bus is not None else MessageBus(member_registry)
         self.runtime_factory = runtime_factory
         self.session_id = session_id
         self.agent_factory = agent_factory
+        self.task_store = task_store
         self._agents: dict[str, TeamAgent] = {}
         self._lock = RLock()
 
@@ -135,9 +149,16 @@ class LifecycleManager:
         parent_runtime: AgentRuntime,
         agent_name: str,
     ) -> AgentRuntime:
-        tool_definitions, tool_handlers = _read_only_tools()
+        tool_definitions, tool_handlers = _team_agent_tools()
         tool_definitions.extend(dict(tool) for tool in TEAM_AGENT_MESSAGE_TOOLS)
         tool_handlers.update(bind_message_handlers(self.get_agent))
+        if self.task_store is not None:
+            tool_definitions.extend(dict(tool) for tool in TEAM_AGENT_TASK_TOOLS)
+            tool_handlers.update(
+                bind_task_handlers(
+                    self.get_agent, self.member_registry, self.task_store
+                )
+            )
         model = dict(parent_runtime.policy.model)
         fallback_model = dict(parent_runtime.policy.fallback_model)
         policy = RunPolicy(
@@ -148,6 +169,7 @@ class LifecycleManager:
             tools_list=tool_definitions,
             tool_handler=tool_handlers,
             can_ask_user=False,
+            allow_background_tools=False,
         )
         agent_state = state(
             messages=[],

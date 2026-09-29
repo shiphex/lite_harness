@@ -144,9 +144,21 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
     assert len(begin_run_calls) == 1
     assert created_with["session_id"] == "session1"
     assert [tool["name"] for tool in created_with["additional_tools"]] == [
-        "spawn_teammate"
+        "spawn_teammate",
+        "create_team_task",
+        "list_team_tasks",
+        "get_team_task",
+        "assign_team_task",
+        "resume_team_task",
     ]
-    assert set(created_with["additional_tool_handlers"]) == {"spawn_teammate"}
+    assert set(created_with["additional_tool_handlers"]) == {
+        "spawn_teammate",
+        "create_team_task",
+        "list_team_tasks",
+        "get_team_task",
+        "assign_team_task",
+        "resume_team_task",
+    }
     assert set(created_with) == {
         "events",
         "interaction",

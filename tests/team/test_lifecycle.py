@@ -78,6 +78,9 @@ def test_spawn_creates_idle_member_and_phase_two_runtime_policy(tmp_path):
         "read_file",
         "glob",
         "load_skill",
+        "bash",
+        "write_file",
+        "edit_file",
         "send_team_message",
         "receive_team_message",
     }
@@ -85,6 +88,9 @@ def test_spawn_creates_idle_member_and_phase_two_runtime_policy(tmp_path):
         "read_file",
         "glob",
         "load_skill",
+        "bash",
+        "write_file",
+        "edit_file",
         "send_team_message",
         "receive_team_message",
     }

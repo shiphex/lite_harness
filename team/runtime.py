@@ -33,6 +33,7 @@ class TeamRuntime:
             runtime_factory=runtime_factory,
             session_id=session_id,
             agent_factory=agent_factory,
+            task_store=self.task_store,
         )
         self.coordinator = TeamCoordinator(
             member_registry=self.member_registry,
