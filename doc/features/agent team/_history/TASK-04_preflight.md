@@ -6,7 +6,7 @@ Task: TASK-04 Messaging Vertical Slice
 
 Baseline: `f8c76c4611e582e99245c9638f3dc5206db3e868`
 
-Outcome: 技术预检完成；DD-01～DD-04 提交设计审阅，裁决见 [`../Human_Review.md`](../Human_Review.md)
+Outcome: 技术预检完成；DD-01～DD-04 提交设计审阅，裁决见 [`TASK-04_human-review.md`](TASK-04_human-review.md)
 
 Source of Truth: `../01_problem.md`～`../08_tasks.md`；本报告只记录预检证据与提案
 

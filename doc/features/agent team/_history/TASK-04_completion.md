@@ -12,7 +12,7 @@ Source of Truth: `../01_problem.md`～`../08_tasks.md`
 
 Preflight: [`TASK-04_preflight.md`](TASK-04_preflight.md)
 
-Accepted design review: [`../Human_Review.md`](../Human_Review.md)
+Accepted design review: [`TASK-04_human-review.md`](TASK-04_human-review.md)
 
 ## Implemented
 

@@ -36,10 +36,10 @@ E2E smoke:
 # 3. Failure Tests
 - [√] F-SPAWN-01 → runtime creation failure returns `SpawnError` and leaves no member / lifecycle-owned TeamAgent
 - [√] F-SPAWN-02 → wrapper、register、publication 或 commit failure reverse-cleans ownership；STARTING record uses `SPAWN_ROLLBACK`
-- [ ] F-MSG-01 → test_send_to_unknown_member_rejected
-- [ ] F-MSG-02 → mailbox full rejects without dropping queued messages
-- [ ] F-MSG-03 → unknown sender or STARTING / STOPPED / FAILED member rejected without state change
-- [ ] F-MSG-04 → empty、non-string and over 16,384-character content rejected
+- [√] F-MSG-01 → unknown target rejected with typed error and no enqueue
+- [√] F-MSG-02 → mailbox full rejects without dropping queued messages
+- [√] F-MSG-03 → unknown sender or STARTING / STOPPED / FAILED member rejected without state change
+- [√] F-MSG-04 → empty、non-string and over 16,384-character content rejected
 - [√] F-STATE-01 → test_invalid_member_transition_rejected_without_state_change
 
 
@@ -49,7 +49,7 @@ E2E smoke:
 - [√] ARCH-01:
 team/registry.py 不允许 import RuntimeFactory
 
-- [ ] ARCH-02:
+- [√] ARCH-02:
 TeamAgent communication 必须经过 MailboxHandle / MessageBus boundary，
 禁止直接访问其他 Agent 或 mailbox storage。
 
@@ -67,10 +67,10 @@ TeamRuntime 是独立的 team composition root，不并入 AgentRuntime；team-s
 Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，不得定义第二套 task model 或引入 Scheduler。
 
 # 4.2 Contract / Isolation 测试
-- [ ] MSG-01 两个已发布 TeamAgent 经各自 handle 和专属工具收发；空队列返回 `None`，FIFO 顺序正确
-- [ ] MSG-02 两个 TeamRuntime 的 mailbox 与成员查询隔离，并发发送不丢失消息
-- [ ] MSG-03 消息操作不启动 TeamAgent `run()` / `query_loop`，不触发 MemberRegistry transition
-- [ ] MSG-TOOL-01 消息工具只在 TeamAgent policy；handler 验证 `ToolContext.runtime` 属于当前 wrapper，不能伪造 sender
+- [√] MSG-01 两个已发布 TeamAgent 经各自 handle 和专属工具收发；空队列返回 `None`，FIFO 顺序正确
+- [√] MSG-02 两个 TeamRuntime 的 mailbox 与成员查询隔离，并发发送不丢失消息
+- [√] MSG-03 消息操作不启动 TeamAgent `run()` / `query_loop`，不触发 MemberRegistry transition
+- [√] MSG-TOOL-01 消息工具只在 TeamAgent policy；handler 验证 `ToolContext.runtime` 属于当前 wrapper，不能伪造 sender
 - [√] STORE-01 两个 TeamRuntime 使用不同 TaskStore，写入与读取互不污染
 - [√] STORE-02 未显式注入 store 的现有工具路径继续使用全局 `TASKS`，原有行为保持兼容
 - [√] REGISTRY-01 所有 MemberState transition 均经过 MemberRegistry 的受控入口
@@ -88,7 +88,7 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 |---|---|---|---|---|---|---|---|
 | [√] | SC-01 spawn | architecture 1.1/2.1/2.4/2.5 | contract 2.4/2.5/3.1/3.3 | F-SPAWN-01/02 | ADR-001/002/007/008/010 | STATE-01/REGISTRY-02/SPAWN-01/MASTER-TOOL-01 | TASK-03 |
 | [ ] | SC-02 统一 AgentRuntime / query_loop | architecture 1.1/2.2 | contract 2.6 | - | ADR-007/009 | ARCH-04 | TASK-03 |
-| [ ] | SC-03 messaging | architecture 2.3 | contract 2.1/2.3/2.6 | F-MSG-01/02/03/04 | ADR-004/006/011 | ARCH-02、MSG-01/02/03、MSG-TOOL-01 | TASK-04 |
+| [√] | SC-03 messaging | architecture 2.3 | contract 2.1/2.3/2.6 | F-MSG-01/02/03/04 | ADR-004/006/011 | ARCH-02、MSG-01/02/03、MSG-TOOL-01 | TASK-04 |
 | [ ] | SC-04 lifecycle entry | architecture 2.4/2.5 | contract 2.4/2.5 | F-SPAWN-01/02、F-STOP-01/F-STATE-01 | ADR-002/005/010 | STATE-03/04/06/07、ARCH-03、REGISTRY-01/02 | TASK-03 / TASK-06 |
-| [ ] | SC-05 no cross-module state mutation | architecture 2.3/2.5 | contract 2.2/2.3/2.5 | F-MSG-01/02/03、F-STATE-01 | ADR-002/003/004/011 | ARCH-02/06、STORE-01/02、REGISTRY-01、MSG-03 | TASK-04 |
+| [ ] | SC-05 no cross-module state mutation | architecture 2.3/2.5 | contract 2.2/2.3/2.5 | F-MSG-01/02/03、F-STATE-01 | ADR-002/003/004/011 | ARCH-02/06、STORE-01/02、REGISTRY-01、MSG-03 | TASK-04 / TASK-05 / TASK-06 |
 
