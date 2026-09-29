@@ -75,3 +75,19 @@ class UnauthorizedMemberOperationError(TeamError):
 
 class SpawnError(TeamError):
     """TeamAgent spawn transaction 失败时抛出。"""
+
+
+class MessageTargetNotFoundError(TeamError):
+    """消息目标不属于当前 TeamRuntime。"""
+
+
+class MessageUnavailableError(TeamError):
+    """发送者或接收者尚未发布或已进入终态。"""
+
+
+class MailboxFullError(TeamError):
+    """目标 mailbox 已达到容量上限。"""
+
+
+class InvalidMessageError(TeamError):
+    """消息内容不满足文本契约。"""

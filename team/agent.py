@@ -6,6 +6,7 @@ from typing import Any, TYPE_CHECKING
 import hook
 
 from .contracts import TeamError
+from .messaging import MailboxHandle
 
 if TYPE_CHECKING:
     from core.runtime import AgentRuntime
@@ -21,6 +22,7 @@ class TeamAgent:
         self,
         *,
         runtime: "AgentRuntime",
+        mailbox_handle: MailboxHandle,
         run_loop: RunLoop | None = None,
     ):
         if run_loop is None:
@@ -28,6 +30,7 @@ class TeamAgent:
 
             run_loop = query_loop
         self.runtime = runtime
+        self.mailbox_handle = mailbox_handle
         self._run_loop = run_loop
 
     def run(self, prompt: str):

@@ -3,11 +3,15 @@
 from .agent import TeamAgent
 from .contracts import (
     DuplicateMemberError,
+    InvalidMessageError,
     InvalidMemberTransitionError,
+    MailboxFullError,
     MemberEvent,
     MemberNotFoundError,
     MemberRecord,
     MemberState,
+    MessageTargetNotFoundError,
+    MessageUnavailableError,
     SpawnError,
     TeamError,
     TransitionSource,
@@ -16,12 +20,13 @@ from .contracts import (
 )
 from .coordinator import TeamCoordinator
 from .lifecycle import LifecycleManager
-from .messaging import MessageBus
+from .messaging import MailboxHandle, MessageBus, TeamMessage
 from .registry import MemberRegistry
 from .runtime import TeamRuntime
 
 __all__ = [
     "DuplicateMemberError",
+    "InvalidMessageError",
     "InvalidMemberTransitionError",
     "LifecycleManager",
     "MemberEvent",
@@ -29,7 +34,12 @@ __all__ = [
     "MemberRecord",
     "MemberRegistry",
     "MemberState",
+    "MailboxFullError",
+    "MailboxHandle",
     "MessageBus",
+    "MessageTargetNotFoundError",
+    "MessageUnavailableError",
+    "TeamMessage",
     "TeamCoordinator",
     "TeamAgent",
     "TeamError",

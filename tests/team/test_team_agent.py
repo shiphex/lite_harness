@@ -6,6 +6,12 @@ import core.loop as loop_module
 import team.agent as agent_module
 from team.agent import TeamAgent
 from team.contracts import TeamError
+from team.messaging import MessageBus
+from team.registry import MemberRegistry
+
+
+def _mailbox_handle():
+    return MessageBus(MemberRegistry()).bind("test-agent")
 
 
 def test_team_agent_run_uses_existing_query_loop_boundary(monkeypatch):
@@ -32,7 +38,9 @@ def test_team_agent_run_uses_existing_query_loop_boundary(monkeypatch):
         "make_hook_context",
         lambda current_runtime: "hook-context",
     )
-    agent = TeamAgent(runtime=runtime, run_loop=run_loop)
+    agent = TeamAgent(
+        runtime=runtime, mailbox_handle=_mailbox_handle(), run_loop=run_loop
+    )
 
     result = agent.run("inspect the module")
 
@@ -65,7 +73,7 @@ def test_team_agent_defaults_to_existing_query_loop(monkeypatch):
         lambda current_runtime: "hook-context",
     )
 
-    result = TeamAgent(runtime=runtime).run("inspect")
+    result = TeamAgent(runtime=runtime, mailbox_handle=_mailbox_handle()).run("inspect")
 
     assert calls == [runtime]
     assert result == (runtime.state, {"reason": "completed"})
@@ -73,7 +81,7 @@ def test_team_agent_defaults_to_existing_query_loop(monkeypatch):
 
 @pytest.mark.parametrize("prompt", ["", "   ", None])
 def test_team_agent_rejects_empty_prompt(prompt):
-    agent = TeamAgent(runtime=SimpleNamespace())
+    agent = TeamAgent(runtime=SimpleNamespace(), mailbox_handle=_mailbox_handle())
 
     with pytest.raises(TeamError, match="prompt"):
         agent.run(prompt)

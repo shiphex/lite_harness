@@ -25,10 +25,11 @@ class TeamRuntime:
     ):
         self.session_id = session_id
         self.member_registry = MemberRegistry()
-        self.message_bus = MessageBus()
+        self.message_bus = MessageBus(self.member_registry)
         self.task_store = TaskStore(Path(task_directory))
         self.lifecycle_manager = LifecycleManager(
             member_registry=self.member_registry,
+            message_bus=self.message_bus,
             runtime_factory=runtime_factory,
             session_id=session_id,
             agent_factory=agent_factory,

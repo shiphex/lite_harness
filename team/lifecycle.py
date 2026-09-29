@@ -15,11 +15,14 @@ from .agent import TeamAgent
 from .contracts import (
     MemberEvent,
     MemberRecord,
+    MessageUnavailableError,
     SpawnError,
     TransitionSource,
     UnregisterReason,
 )
 from .registry import MemberRegistry
+from .messaging import MessageBus
+from .messaging_tools import TEAM_AGENT_MESSAGE_TOOLS, bind_message_handlers
 
 
 _AGENT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
@@ -46,11 +49,13 @@ class LifecycleManager:
         self,
         *,
         member_registry: MemberRegistry,
+        message_bus: MessageBus | None = None,
         runtime_factory: type[RuntimeFactory] = RuntimeFactory,
         session_id: str | None = None,
         agent_factory: Callable[..., TeamAgent] = TeamAgent,
     ):
         self.member_registry = member_registry
+        self.message_bus = message_bus if message_bus is not None else MessageBus(member_registry)
         self.runtime_factory = runtime_factory
         self.session_id = session_id
         self.agent_factory = agent_factory
@@ -75,7 +80,10 @@ class LifecycleManager:
                 runtime = self._create_runtime(parent_runtime, agent_name)
 
                 stage = "TeamAgent wrapper creation"
-                agent = self.agent_factory(runtime=runtime)
+                agent = self.agent_factory(
+                    runtime=runtime,
+                    mailbox_handle=self.message_bus.bind(runtime.agent_id),
+                )
 
                 stage = "member registration"
                 self.member_registry.register(runtime.agent_id, runtime.agent_name)
@@ -100,6 +108,15 @@ class LifecycleManager:
                     raise
                 raise SpawnError(f"spawn 在 {stage} 失败: {exc}") from exc
 
+    def get_agent(self, agent_id: str) -> TeamAgent:
+        """查询 LifecycleManager 当前持有的 TeamAgent，不转移 ownership。"""
+
+        with self._lock:
+            try:
+                return self._agents[agent_id]
+            except (KeyError, TypeError) as exc:
+                raise MessageUnavailableError(f"TeamAgent {agent_id!r} 不存在") from exc
+
     def _validate_spawn_request(
         self,
         parent_runtime: AgentRuntime,
@@ -119,6 +136,8 @@ class LifecycleManager:
         agent_name: str,
     ) -> AgentRuntime:
         tool_definitions, tool_handlers = _read_only_tools()
+        tool_definitions.extend(dict(tool) for tool in TEAM_AGENT_MESSAGE_TOOLS)
+        tool_handlers.update(bind_message_handlers(self.get_agent))
         model = dict(parent_runtime.policy.model)
         fallback_model = dict(parent_runtime.policy.fallback_model)
         policy = RunPolicy(
