@@ -19,7 +19,7 @@ Optional Real-model E2E Smoke 在 Phase 6 完成后执行，不阻塞 MVP。
 | ------- | ------- | ------- | ------- | ------- |
 | [√] | Phase 0 | Existing Code Gap Analysis       | Spec 与现有 Runtime/Task/Tool 对齐            | Existing Code Gap Analysis |
 | [√] | Phase 1 | Team contract implementation / composition | 落实已接受的 Contract，TeamRuntime 建立共享服务 | Team Core Contract Implementation & Composition |
-| [ ] | Phase 2 | Spawn vertical slice             | Master → Coordinator → Lifecycle → Registry  | Spawn Vertical Slice |
+| [√] | Phase 2 | Spawn vertical slice             | Master → Coordinator → Lifecycle → Registry  | Spawn Vertical Slice |
 | [ ] | Phase 3 | Messaging vertical slice         | TeamAgent → MailboxHandle → MessageBus       | Messaging Vertical Slice |
 | [ ] | Phase 4 | Task collaboration               | MasterAgent + existing TaskStore + TeamAgent | Task Collaboration |
 | [ ] | Phase 5 | Shutdown / teardown / failures   | 生命周期和 rollback 闭环                      | Shutdown / Teardown / Failure Closure |
@@ -28,124 +28,97 @@ Optional Real-model E2E Smoke 在 Phase 6 完成后执行，不阻塞 MVP。
 
 # Current Facts
 
-> TASK-01 与 TASK-02 已使用独立代码证据验证下列事实，Human Review 已接受验证结果。
+维护规则：切换当前任务时，只保留与该任务有关、且有验收证据的代码事实，目标约 7～8 条。
 
-Validated against: `70825632e033e64778d5373d6d8da2b619a56ad8`
+> TASK-01～TASK-03 的下列代码事实已通过对应审阅；TASK-03 的受托完成审阅见 [`_history/TASK-03_completion-review.md`](_history/TASK-03_completion-review.md)。
+
+Validated against: CF-01～CF-03 为 `70825632e033e64778d5373d6d8da2b619a56ad8`；CF-04～CF-07 为 `04224aeffcd1579e214a2a8bb90969225bf1878c`。
 
 | ID | Status | Confirmed code fact | Evidence |
 | --- | --- | --- | --- |
-| CF-01 | `confirmed` | `AgentRuntime` 已存在。 | `7082563/core/runtime.py:113` |
-| CF-02 | `confirmed` | 当前 MasterAgent 和 Subagent 均通过 `query_loop` 执行。 | `7082563/core/agent.py:147`、`7082563/tools/subagent.py:167` |
-| CF-03 | `confirmed` | `task_system` 使用现有 `TaskStore` 与 JSON 文件持久化任务。 | `7082563/tools/task_system.py:49`、`7082563/tools/task_system.py:127`、`7082563/tools/task_system.py:201`、`7082563/tools/task_system.py:217` |
-| CF-04 | `confirmed` | task operations 已支持显式 `store=` 注入，未注入时动态使用全局 `TASKS`。 | `7082563/tools/task_system.py:247`、`7082563/tools/task_system.py:253`、`7082563/tools/task_system.py:367`、`7082563/tools/task_system.py:395` |
-| CF-05 | `confirmed` | `MemberRegistry` 已作为 MemberState 的 authoritative owner，通过受控 `transition()` 应用状态变化。 | `7082563/team/registry.py:65`、`7082563/team/registry.py:138` |
-| CF-06 | `confirmed` | `MessageBus` 已作为 team-scoped mailbox ownership shell 存在，尚未实现 messaging behavior。 | `7082563/team/messaging.py:4` |
-| CF-07 | `confirmed` | `TeamRuntime` 已独立组装并持有 MemberRegistry、MessageBus、TaskStore、LifecycleManager 与 TeamCoordinator。 | `7082563/team/runtime.py:14`、`7082563/team/runtime.py:23` |
+| CF-01 | `confirmed` | `MemberRegistry` 已作为 MemberState 的 authoritative owner，通过受控 `transition()` 应用状态变化。 | `7082563/team/registry.py:65`、`7082563/team/registry.py:138` |
+| CF-02 | `confirmed` | `MessageBus` 已作为 team-scoped mailbox ownership shell 存在，尚未实现 messaging behavior。 | `7082563/team/messaging.py:4` |
+| CF-03 | `confirmed` | `TeamRuntime` 已独立组装并持有 MemberRegistry、MessageBus、TaskStore、LifecycleManager 与 TeamCoordinator。 | `7082563/team/runtime.py:14`、`7082563/team/runtime.py:23` |
+| CF-04 | `confirmed` | Master session 建立 sibling TeamRuntime，并仅向 Master 实例绑定 `spawn_teammate` 工具。 | `04224ae/core/agent.py:124`、`04224ae/core/agent.py:125`、`04224ae/core/agent.py:136`、`04224ae/tools/team.py:11` |
+| CF-05 | `confirmed` | `LifecycleManager.spawn()` 创建 TeamAgent 的 AgentRuntime、发布 IDLE member，并在 commit 前失败时清理逻辑 ownership 与 STARTING record。 | `04224ae/team/lifecycle.py:60`、`04224ae/team/lifecycle.py:81`、`04224ae/team/lifecycle.py:90`、`04224ae/team/lifecycle.py:161`、`04224ae/team/lifecycle.py:167` |
+| CF-06 | `confirmed` | 被动 TeamAgent wrapper 的 `run(prompt)` 进入现有 `query_loop`；spawn 本身不启动执行。 | `04224ae/team/agent.py:27`、`04224ae/team/agent.py:33`、`04224ae/team/lifecycle.py:77` |
+| CF-07 | `confirmed` | Phase 2 的 TeamAgent 仅配置 `read_file`、`glob`、`load_skill` 三个只读工具，尚未暴露消息能力。 | `04224ae/team/lifecycle.py:26`、`04224ae/team/lifecycle.py:121` |
 
 ## Accepted Design Constraints
 
+维护规则：只摘要约 7～8 条跨阶段约束；除重大方向或理念变更外，不随普通任务进度改写。
+
 | ID | Constraint | Source |
 | --- | --- | --- |
-| DC-01 | TeamAgent 复用现有 `AgentRuntime`，不新建一套 TeamAgentRuntime。 | `01_problem.md` §2.1、`02_architecture.md` §2.2 |
-| DC-02 | TeamAgent 必须通过统一 `query_loop` 执行。 | `01_problem.md` SC-02、`07_test_plan.md` ARCH-04 |
-| DC-03 | TeamRuntime 是独立于 AgentRuntime 的 team composition root，负责组装并持有 team-scoped shared services；具体代码落点不是架构约束。 | `02_architecture.md` §2.1、`06_decisions.md` ADR-001 |
-| DC-04 | MemberRegistry 是 MemberState 的唯一 authoritative owner；所有状态变化经过受控转换入口，STOPPED / FAILED record 保留到 TeamRuntime 最终释放。 | `02_architecture.md` §2.4～2.5、`03_runtime.md` §1.2、`04_contracts.md` §2.5、`06_decisions.md` ADR-002 |
-| DC-05 | 每个 TeamRuntime 使用独立的现有 TaskStore；Team 路径采用显式 store 注入，不复制任务逻辑，并保持全局 `TASKS` 工具路径兼容。 | `02_architecture.md` §2.1、`04_contracts.md` §2.2 / §3.2、`06_decisions.md` ADR-003 |
-| DC-06 | 设计和测试引用现有 runtime factory 时使用实际符号 `RuntimeFactory`。 | `f90561f/core/runtime.py:143`、`07_test_plan.md` ARCH-01 |
-| DC-07 | Spawn 只发布被动 TeamAgent wrapper；IDLE 是 commit，spawn 本身不启动线程或模型执行。 | `06_decisions.md` ADR-007 |
-| DC-08 | 一个 Master session 对应一个 sibling TeamRuntime；composition scope 显式共享 session_id，并通过 Master-only bound handler 连接两者。 | `06_decisions.md` ADR-008 |
-| DC-09 | TeamAgent 有独立 runtime/state/history/identity，Phase 2 使用已接受的 provisional read-only execution policy。 | `06_decisions.md` ADR-009 |
-| DC-10 | 只有 LifecycleManager 创建并逻辑持有 TeamAgent runtime/wrapper；commit 前逆序 rollback，不承诺删除 runtime diagnostic artifacts。 | `06_decisions.md` ADR-010 |
+| DC-01 | TeamAgent 复用现有 `AgentRuntime` 与统一 `query_loop`，不新建 TeamAgentRuntime 或第二套 loop。 | `01_problem.md` §2.1 / SC-02、`02_architecture.md` §2.2、`07_test_plan.md` ARCH-04 |
+| DC-02 | TeamRuntime 独立于 AgentRuntime，组装并持有 team-scoped shared services；一个 Master session 对应一个 sibling TeamRuntime，共享显式 session_id，并通过 Master-only bound handler 连接。具体代码落点不是架构约束。 | `02_architecture.md` §2.1、`06_decisions.md` ADR-001 / ADR-008 |
+| DC-03 | MemberRegistry 是 MemberState 的唯一 authoritative owner；所有状态变化经过受控转换入口，STOPPED / FAILED record 保留到 TeamRuntime 最终释放。 | `02_architecture.md` §2.4～2.5、`03_runtime.md` §1.2、`04_contracts.md` §2.5、`06_decisions.md` ADR-002 |
+| DC-04 | 每个 TeamRuntime 使用独立的现有 TaskStore；Team 路径采用显式 store 注入，不复制任务逻辑，并保持全局 `TASKS` 工具路径兼容。 | `02_architecture.md` §2.1、`04_contracts.md` §2.2 / §3.2、`06_decisions.md` ADR-003 |
+| DC-05 | MessageBus 管理 team-scoped mailbox storage；Agent 只通过自身的 MailboxHandle 使用收发能力，不直接持有或修改 mailbox。 | `02_architecture.md` §2.3、`04_contracts.md` §2.1 / §2.3、`06_decisions.md` ADR-004 |
+| DC-06 | 消息执行语义采用 one-message-one-turn；本阶段只落实收发边界，不据此启动 TeamAgent 执行。 | `06_decisions.md` ADR-006、`03_runtime.md` §1.1 / §1.4 |
+| DC-07 | Spawn 只发布被动 TeamAgent wrapper，IDLE 是 commit；只有 LifecycleManager 通过实际符号 `RuntimeFactory` 创建并逻辑持有 TeamAgent runtime/wrapper，commit 前逆序 rollback，不承诺删除 runtime diagnostic artifacts。 | `06_decisions.md` ADR-007 / ADR-010、`f90561f/core/runtime.py:143`、`07_test_plan.md` ARCH-01 |
+| DC-08 | TeamAgent 有独立 runtime/state/history/identity；Phase 2 的只读 execution policy 是 provisional mechanism。 | `06_decisions.md` ADR-009 |
 
 
-# TASK-03 Spawn Vertical Slice
+# TASK-04 Messaging Vertical Slice
 
 Status:
-In Progress / Awaiting Human Review
+In Progress / Awaiting Completion Review
 
 Goal:
-打通 Master team tool → TeamCoordinator → LifecycleManager → RuntimeFactory / AgentRuntime → MemberRegistry 的完整 spawn 垂直链路。MasterAgent 可以创建至少一个 TeamAgent；成功创建的 TeamAgent 复用现有 AgentRuntime，并通过统一 `query_loop` 执行。
+建立 TeamAgent → MailboxHandle → TeamRuntime-owned MessageBus → 目标 MailboxHandle 的可测试消息收发链路。Phase 3 交付明确的通信边界、路由与失败语义；收到消息不自动触发 `TeamAgent.run()` 或 `query_loop`。
 
 References:
-- REQUIREMENT: `01_problem.md` §2.1、§3 Non-goal、SC-01、SC-02、SC-04、SC-06、SC-07
-- FACTS: 本文 `Current Facts` 与 `Accepted Design Constraints`
-- ARCH: `02_architecture.md` §1.1、§2.1～§2.6
-- RUNTIME: `03_runtime.md` §1.1～§1.2
-- CONTRACT: `04_contracts.md` §2.4、§2.5、§3.1～§3.2
-- FAILURE: `05_failures.md` §1、F-SPAWN-01、F-SPAWN-02、F-STATE-01
-- ADR: `06_decisions.md` 中的 ADR-001、ADR-002、ADR-007～ADR-010
-- TEST: `07_test_plan.md` §1、STATE-01、F-SPAWN-01、F-SPAWN-02、ARCH-03、ARCH-04，以及所有已勾选的 Phase 1 回归项
+- REQUIREMENT: `01_problem.md` §2.1 Capability、§3 Non-goal、SC-03、SC-05～SC-07
+- FACTS: 本文 `Current Facts` 与 `Accepted Design Constraints`；TASK-03 完成验收见 [`_history/TASK-03_completion-review.md`](_history/TASK-03_completion-review.md)
+- ARCH: `02_architecture.md` §1.1、§2.2～§2.3、§2.6
+- RUNTIME: `03_runtime.md` §1.1、§1.4
+- CONTRACT: `04_contracts.md` §2.1、§2.3、§3.2
+- FAILURE: `05_failures.md` §1、F-MSG-01、F-MSG-02、§3 message to STOPPED member
+- ADR: `06_decisions.md` ADR-001、ADR-004、ADR-006～ADR-009、ADR-011
+- TEST: `07_test_plan.md` §1、F-MSG-01～04、ARCH-02、MSG-01～03、MSG-TOOL-01，以及所有已勾选的回归项
 
 Preconditions:
-- `01_problem.md`～`07_test_plan.md` 是当前设计基线。
-- `feature/team` 是目标分支。
-- `feature/agent_teams` 只作为只读参考，不照搬其 worker、profile、worktree、messaging 或 task collaboration 设计。
-- TASK-02 已完成并通过 Human Review；本文 Current Facts 以 `7082563` 的已接受代码证据为准。
+- `01_problem.md`～`07_test_plan.md` 是当前设计基线；TASK-03 已完成并通过受托完成审阅，Phase 2 的被动 spawn 与 TeamAgent execution boundary 可作为 Phase 3 起点。
+- `feature/team` 是目标分支；`feature/agent_teams` 只作为只读参考，不照搬其 messaging、worker 或 task collaboration 设计。
+- 进入 TASK-04 前，MessageBus 仅有 team-scoped ownership shell，没有 MailboxHandle 或 send/receive 行为；实现基线为 `f8c76c4`。
 
 Allowed scope:
-- Primary scope:
-   - `team/*` 中完成 spawn orchestration、lifecycle 和最小 TeamAgent execution boundary
-   - `tools/*` 中 Master 可调用的最小 team spawn tool / handler seam
-   - Master 与 TeamRuntime 建立连接所必需的最小 composition seam
-   - `tests/team/*` 及验证 Master tool integration 所需的最小测试
-- `core/*` 仅允许为 Master composition seam 做最小修改；不得改变 AgentRuntime ownership/state model、`query_loop` 通用执行语义或现有 Master/Subagent 行为。
-- TASK-03 只落实 Phase 2 的 spawn vertical slice，不提前实现 Phase 3～5 的 messaging、task collaboration、shutdown 或 teardown 行为。
+- 在 `team/*` 中实现 MailboxHandle、MessageBus 路由与 mailbox ownership，并完成 TeamRuntime、LifecycleManager、TeamAgent 之间必要的最小绑定。
+- 只在消息能力确有需要且经 preflight 裁决后，增加最小的 TeamAgent 工具或 handler 接缝；不得扩展通用 Master/Subagent 工具集合。
+- 增加 `tests/team/*` 及必要的工具边界测试；保留全部已接受阶段的回归测试。
 
 Must:
-- 提供 MasterAgent 可调用的 spawn tool 入口，并将请求转交 `TeamCoordinator.spawn_teammate(...)`。
-- TeamCoordinator 只编排 spawn use case，不直接构造 runtime、不调用 LLM、不保存 LifecycleManager 应持有的 worker 内部状态。
-- 只有 `LifecycleManager.spawn(...)` 可以调用 RuntimeFactory 创建 TeamAgent 使用的现有 AgentRuntime，并协调 runtime、worker 与 registry 的创建/发布顺序。
-- 使用 RuntimeFactory 生成的实际 `agent_id` 和 `agent_name` 注册 MemberRegistry；注册产生 STARTING record，spawn 成功后由 LifecycleManager 请求 `SPAWN_SUCCESS` transition，最终返回可查询的 IDLE member。
-- TeamAgent 复用现有 AgentRuntime / `query_loop`，保持独立运行状态与 history；不得创建 TeamAgentRuntime 或第二套 agent loop。
-- runtime 创建、member 注册、worker 创建/启动或发布任一步骤失败时，清理此前产生的部分资源；发布成功前已注册的 STARTING record 使用 `SPAWN_ROLLBACK` 移除，最终不得残留 member 或 worker。
-- domain failure 使用 typed error/result，不允许 silent failure；自动测试使用 fake runtime / fake loop，不调用真实模型。
+- TeamAgent 通过自身的 MailboxHandle 发送和接收消息；MessageBus 负责 team-scoped mailbox storage、目标路由与入队，Agent 不直接访问其他 Agent 或 mailbox 内部存储。
+- 正常收发可验证消息到达指定目标，且不同 TeamRuntime 的 mailbox 与消息互不污染。
+- 目标不存在时按 F-MSG-01 拒绝；mailbox 满时按 F-MSG-02 拒绝或施加明确背压，不得静默丢失消息。已 STOPPED 的目标必须有明确、可测试的处理结果。
+- domain failure 使用 typed error/result；消息操作不绕过 MemberRegistry 修改 MemberState，也不改变现有 spawn ownership 与执行边界。
+- 自动测试使用确定性的 fake / in-memory 依赖，不调用真实模型；所有已勾选回归项持续通过。
 
 Must not:
-- 不实现 MessageBus / MailboxHandle 的 send、receive 或 mailbox storage behavior。
-- 不实现 task assignment、task claim/complete binding 或 TeamAgent 自主取任务。
-- 不实现 shutdown、teardown、fatal runtime supervision 等 Phase 5 行为；只实现 spawn 失败所必需的局部 rollback。
-- 不引入 Scheduler、worktree、writer/researcher profile、session conversation policy 或 real-model E2E。
-- 不复制 `tools/subagent.py` 的独立运行时构造逻辑，不修改 AgentRuntime 的状态所有权，也不让 TeamAgent 自行创建 AgentRuntime。
-- 不把 Registry、Lifecycle 或 worker 内部行为塞进 TeamRuntime / TeamCoordinator。
-
-| Phase 2 做 | Phase 2 不做 |
-|---|---|
-| Master spawn tool → Coordinator | Messaging / MailboxHandle behavior |
-| LifecycleManager 创建 AgentRuntime / worker | Task assignment / collaboration |
-| Registry STARTING → IDLE 发布 | Shutdown / teardown / fatal supervision |
-| TeamAgent 复用 query_loop | Scheduler / worktree / profiles |
-| Spawn failure rollback | Real-model E2E |
+- 不因 send、receive 或消息入队自动触发 `TeamAgent.run()`、`query_loop`、后台线程或 MemberState 的 BUSY / WAITING transition；ADR-006 的 one-message-one-turn 执行语义留待执行触发阶段落实。
+- 不实现 task assignment、claim/complete binding、TeamAgent 自主取任务、shutdown、teardown 或 fatal runtime supervision。
+- 不引入 Scheduler、worktree、profile、conversation session policy 或 real-model E2E；不把 mailbox storage 放进 TeamAgent、TeamCoordinator 或 AgentRuntime。
 
 Preflight resolution (Accepted):
-- DD-01～DD-04 已完成人审并接受；完整裁决见 [`_history/TASK-03_human-review.md`](_history/TASK-03_human-review.md)。
-- Master session composition scope 创建 sibling Master AgentRuntime / TeamRuntime，并以 per-instance bound handler 连接。
-- TeamAgent 是 LifecycleManager 逻辑持有的被动 execution wrapper；`run(prompt)` 复用既有 `query_loop`。
-- `TeamCoordinator.spawn_teammate(...)` 与 `LifecycleManager.spawn(...)` 返回 MemberRecord，domain failure 使用 `SpawnError(TeamError)`。
-- IDLE 是 commit；commit 前逆序清理 ownership，并以 `SPAWN_ROLLBACK` 移除 STARTING record。rollback 不删除 RuntimeFactory diagnostic artifacts。
+- DD-01～DD-04 已由用户委托技术审阅接受；完整裁决见 [`Human_Review.md`](Human_Review.md)，已传播到 `02_architecture.md`～`07_test_plan.md`。
+- 使用绑定实际 sender_id 的 MailboxHandle、不可变 TeamMessage、容量默认 100 条的内存 FIFO；content 上限为 16,384 字符，满载立即拒绝。
+- MessageBus 只查询本 TeamRuntime Registry，STARTING / STOPPED / FAILED 成员不可收发；bus 锁不承诺与未来 shutdown 跨模块线性化。
+- TeamAgent 专属消息工具通过 `ToolContext.runtime` 查找并验证 wrapper 的 handle；消息本身不启动执行。
+
+Implementation evidence:
+- [`_history/TASK-04_completion.md`](_history/TASK-04_completion.md) 记录本轮实现、自动验证与剩余风险；完成审阅接受前保持当前 In Progress 状态。
 
 Verify:
-- happy path 必须经过 Master tool、TeamCoordinator、LifecycleManager、RuntimeFactory / AgentRuntime 与 MemberRegistry，返回的 member state 为 IDLE。
-- spawn_teammate 只进入 MasterAgent 的 allowed tool set / handler binding；TeamAgent 与普通 Subagent 不暴露该能力。
-- Registry record 的 `agent_id` / `agent_name` 与 RuntimeFactory 返回的 AgentRuntime 一致。
-- TeamAgent 执行进入现有 `query_loop`；不存在 TeamAgentRuntime 或第二套 loop。
-- F-SPAWN-01：runtime create 失败后无 member、无 leaked worker。
-- F-SPAWN-02：register 或发布失败后 runtime / worker 被清理，STARTING record 被 rollback，最终无 member。
-- ARCH-03：Agent creation 入口必须经过 LifecycleManager。
-- ARCH-04：全部 TeamAgent 使用现有 AgentRuntime / `query_loop`。
-- 所有 `07_test_plan.md` 已勾选项目持续通过；使用 fake runtime / fake loop，不执行 real-model E2E。
-- scope creep：控制 Allowed scope，并通过 diff audit 确认未提前实现 Phase 3～5 或 Non-goal。
-- Optional manual smoke：在本地模型/API配置可用时，可运行 uv run main.py 手工验证 MasterAgent 能通过 team tool 触发 spawn；该项不作为 TASK-03 Done / Phase 2 gate。
+- 两个已发布的 TeamAgent 经各自 MailboxHandle 完成发送与接收；消息只进入指定目标的 team-scoped mailbox，不暴露其他 Agent 或 MessageBus 内部存储。
+- F-MSG-01、F-MSG-02、STOPPED 目标与跨 TeamRuntime 隔离均有自动测试；失败可观察且没有 silent loss。
+- ARCH-02 验证 Agent communication 只能经 MailboxHandle / MessageBus；已勾选的 spawn、registry、runtime 和 task-store 回归项继续通过。
+- diff audit 确认没有消息驱动执行、任务协作、shutdown / teardown 或 Non-goal 能力；不要求真实模型 smoke。
 
 Handoff:
-- 动手前，Codex 只提交 Preflight Brief，不修改仓库。(Baseline、Planned changes、Target files/modules、Relevant constraints、Open blockers / Design Deltas、Ready / Blocked)
-- Human 审阅报告，并决定接受、拒绝或要求补充证据。
-- 只有被 Human 接受的事实才更新到 Current Facts，被接受的设计变化才更新到 `01_problem.md`～`07_test_plan.md`。
-- Human Review 完成后，才能开始实现。
-- Completion Report 没有经过 Human 接受前，TASK-03 仍然是 In Progress，不得勾选 Phase 2 或标记 Done / Phase 2 complete。
-- After coding 提交：Completion Report(Implemented、Files changed、Tests、Boundary checks、Design deltas、Remaining risks、Task Done / Blocked)
-
-Design delta:
-- Preflight DD-01～DD-04 已接受并传播至 `02_architecture.md`～`08_tasks.md`；实现阶段未发现新的 Design Delta。
+- 实现前提交只读 Preflight Brief，列出 baseline、拟修改模块、已验证事实、待裁决设计问题和 Ready / Blocked 结论；不在 preflight 阶段修改代码。
+- Human 审阅并接受设计裁决后，才开始实现；只有被接受的新事实或设计变化才能传播到本文及对应的 `01_problem.md`～`07_test_plan.md`。
+- 实现后提交 Completion Report，记录改动、测试、边界检查、设计变化与剩余风险；完成审阅接受前，TASK-04 保持 In Progress，Phase 3 与 SC-03 不勾选。
 
 
 # Completed Tasks
@@ -154,3 +127,4 @@ Design delta:
 |---|---|---|---|
 | TASK-01 Existing Code Gap Analysis | Done / Phase1 GO | `f90561fff98dcc86ec4261b38e6c32f04c9a9f96` | _history/TASK-01_*.md |
 | TASK-02 Team Core Contract Implementation & Composition | Done / Phase 1 complete | `70825632e033e64778d5373d6d8da2b619a56ad8` | _history/TASK-02_*.md |
+| TASK-03 Spawn Vertical Slice | Done / Phase 2 complete | `f8c76c4611e582e99245c9638f3dc5206db3e868` | _history/TASK-03_*.md |

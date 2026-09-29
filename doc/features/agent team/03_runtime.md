@@ -175,6 +175,8 @@ send
 详见：F-MSG-01 / F-MSG-02
 ```
 
+Phase 3 的消息收发是同步、非阻塞操作：每个 mailbox 是最多 100 条消息的 FIFO 队列，空队列 receive 返回 `None`，满队列 send 立即拒绝且不丢失旧消息。单条 content 最多 16,384 字符。Bus 只接受本 TeamRuntime Registry 中处于 IDLE / BUSY / WAITING 的 sender 与 target；STARTING / STOPPED / FAILED 成员不可收发。收发不触发 TeamAgent `run()`、模型执行或 MemberState transition；ADR-006 的 one-message-one-turn 执行驱动留待后续阶段。
+
 
 # 2. Team 生命周期示例
 ``` text

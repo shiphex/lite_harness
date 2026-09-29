@@ -63,7 +63,7 @@ Capability：
 
 
 # 4. Success Criteria
-- [ ] SC-01 MasterAgent 可以创建至少一个 TeamAgent；
+- [√] SC-01 MasterAgent 可以创建至少一个 TeamAgent；
 - [ ] SC-02 TeamAgent 使用现有统一 AgentRuntime / query_loop 执行任务；
 - [ ] SC-03 TeamAgent 之间只能通过明确的 team communication contract 通信；
 - [ ] SC-04 TeamAgent 的创建、销毁必须经过统一生命周期入口；

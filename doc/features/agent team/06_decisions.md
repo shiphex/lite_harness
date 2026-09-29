@@ -279,3 +279,31 @@ None
 Review source: [_history/TASK-03_human-review.md DD-04](_history/TASK-03_human-review.md#dd-04)
 
 
+## ADR-011 Phase-3 messaging protocol 与 TeamAgent capability
+
+Status:
+Accepted
+
+Context:
+Phase 3 需要在既有被动 TeamAgent 与 team-scoped MessageBus 之间建立可测试的收发路径。ADR-004 已确定 bus 拥有 mailbox，ADR-006 已确定未来执行采用 one-message-one-turn，但容量、成员状态、消息工具与同步边界尚未裁决。
+
+Decision:
+- LifecycleManager 用 RuntimeFactory 返回的实际 `agent_id` 创建 MailboxHandle，并注入 TeamAgent wrapper；handle 固定 sender 身份，消息不得由调用者指定 sender。
+- 使用不可变 `TeamMessage(sender_id, target_id, content)`；content 为非空文本，最多 16,384 字符。
+- MessageBus 仅查询所属 TeamRuntime 的 MemberRegistry，按需创建容量默认 100 条的内存 FIFO mailbox；容量可在构造时配置为正整数。同步 send / receive 由 bus 锁保护，空队列返回 `None`，满队列立即拒绝且原队列不变。
+- IDLE / BUSY / WAITING 成员可收发；目标不存在、sender 不存在、STARTING / STOPPED / FAILED 成员、无效 content 和满队列均用 `TeamError` 子类显式拒绝。
+- 仅 TeamAgent policy 增加 `send_team_message` / `receive_team_message` 工具。Handler 根据 `ToolContext.runtime` 找到当前 wrapper 并验证对象身份，通过其 handle 收发；Master 与普通 Subagent 不获得这些工具。
+- 收发不自动触发 `run()`、模型执行或 MemberState transition；不承诺与未来并发 shutdown 的跨模块原子性。
+
+Alternatives:
+- 仅暴露宿主 wrapper API：拒绝，query_loop 中的 TeamAgent 无法使用通信能力。
+- 无界队列或阻塞重试：拒绝，难以控制内存占用或验证失败路径。
+- 消息到达即启动 TeamAgent：拒绝，超出 Phase 3 的收发边界。
+
+Consequences:
+- Phase 3 可以用 fake runtime 与显式工具调用验证消息垂直链路，无需真实模型。
+- MessageBus 不拥有 AgentRuntime 或生命周期；跨模块 shutdown 竞态留待 Phase 5。
+
+Review source: [Human_Review.md TASK-04 DD-01～DD-04](Human_Review.md)
+
+

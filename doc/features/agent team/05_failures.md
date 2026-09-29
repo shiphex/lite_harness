@@ -16,13 +16,17 @@
 |---|---|---|---|---|---|
 | F-SPAWN-01 | runtime create failed | LifecycleManager | LifecycleManager | 返回 `SpawnError`；释放已取得的逻辑 ownership | no member / no lifecycle-owned worker |
 | F-SPAWN-02 | wrapper、register、publication 或 IDLE commit failed | LifecycleManager | LifecycleManager | 逆序释放 wrapper/runtime reference；STARTING record 使用 `SPAWN_ROLLBACK` unregister | no member / no lifecycle-owned worker |
-| F-MSG-01 | target missing | MessageBus | sender | reject | typed error |
-| F-MSG-02 | mailbox full | MessageBus | MessageBus | reject/backpressure | no silent loss |
+| F-MSG-01 | target missing | MessageBus | sender | reject with `MessageTargetNotFoundError` | no enqueue |
+| F-MSG-02 | mailbox full | MessageBus | MessageBus | reject with `MailboxFullError` | no silent loss / original queue unchanged |
+| F-MSG-03 | sender missing or sender/target STARTING、STOPPED、FAILED | MessageBus | sender | reject with `MessageUnavailableError` | no enqueue / no state change |
+| F-MSG-04 | empty、non-string or over 16,384-character content | MessageBus | sender | reject with `InvalidMessageError` | no enqueue |
 | F-TASK-01 | task already claimed | TaskStore | caller | conflict | retry/read |
 | F-STATE-01 | invalid member state transition | MemberRegistry | caller | reject；保持原状态 | typed error/result |
 | F-STOP-01 | worker won't stop | LifecycleManager | Coordinator | force cleanup policy；通过 MemberRegistry 记录终态 | queryable FAILED/STOPPED record |
 
 F-SPAWN-01 / F-SPAWN-02 的 “no leaked worker” 指 LifecycleManager 不再保留可达的 TeamAgent wrapper / AgentRuntime。由于当前 AgentRuntime 没有 `destroy()` / `close()` contract，失败前由 RuntimeFactory 创建的 runtime diagnostic directories 可以保留，不视为 Phase-2 rollback failure。
+
+Phase 3 的 bus 锁仅保证单次队列操作原子；与未来并发 shutdown 的跨模块线性化不在本阶段承诺范围，Phase 5 必须重新审阅该竞态。
 
 
 # 3. 必然面对的 P0 failures

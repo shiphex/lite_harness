@@ -19,9 +19,12 @@ tools/
 # 2. code contract
 
 ## 2.1 MailboxHandle Contract
-MailboxHandle
-    send(...)
-    receive(...)
+`TeamMessage(sender_id: str, target_id: str, content: str)` 是不可变消息。ID 为实际 AgentRuntime `agent_id`，必须与 Registry 中的规范 ID 完全一致（不接受首尾空白）；content 是非空文本，最多 16,384 字符。
+
+- `MailboxHandle.send(target_id: str, content: str) -> None`
+- `MailboxHandle.receive() -> TeamMessage | None`；`None` 表示 mailbox 为空，不阻塞。
+
+LifecycleManager 为 TeamAgent 绑定 sender_id；send 不接受 sender_id 参数。TeamAgent 只能通过自身 handle 使用 MessageBus，不持有或修改 mailbox storage。
 
 
 ## 2.2 TaskStore Protocol
@@ -44,13 +47,17 @@ TaskStore 集成约束：
 ## 2.3 MessageBus Protocol
 MessageBus 需要的函数：
 - Public:
-  - send
-  - receive
+  - `send(*, sender_id: str, target_id: str, content: str) -> None`
+  - `receive(agent_id: str) -> TeamMessage | None`
 - Private:
   - _enqueue
 
 
 图表示逻辑消息路径；Agent 实际通过 MailboxHandle 使用该能力，不直接访问 MessageBus 内部 mailbox。
+
+`MessageBus(registry: MemberRegistry, *, capacity: int = 100)` 只查询所属 TeamRuntime 的 Registry；capacity 必须是正整数。每个 mailbox 是同步加锁的内存 FIFO 队列，按需创建；send / receive 分别在 bus 内原子执行，不承诺与并发 shutdown 的跨模块线性化。空队列返回 `None`，满队列立即抛 `MailboxFullError` 且原队列不变；不阻塞、不重试、不持久化。
+
+不存在的 target 抛 `MessageTargetNotFoundError`。不存在或处于 STARTING / STOPPED / FAILED 的 sender，以及处于这些状态的 target，抛 `MessageUnavailableError`。IDLE / BUSY / WAITING 成员可收发。无效 content 抛 `InvalidMessageError`；上述错误均继承 `TeamError`。消息操作不调用 `MemberRegistry.transition()`。
 
 
 ## 2.4 LifecycleManager Protocol
@@ -101,7 +108,7 @@ MemberRegistry 不应存在的函数：
 
 ## 2.6 TeamAgent Contract
 
-- `TeamAgent(runtime: AgentRuntime)` 是被动 execution wrapper，不创建 AgentRuntime。
+- `TeamAgent(runtime: AgentRuntime, mailbox_handle: MailboxHandle)` 是被动 execution wrapper，不创建 AgentRuntime；handle 由 LifecycleManager 用实际 `agent_id` 绑定。
 - `TeamAgent.run(prompt) -> existing query_loop result`。
 - 每个 TeamAgent 有独立 AgentRuntime / state / history / identity / runtime paths，与 Master 共享 session_id 和当前 workspace。
 - TeamAgent 不直接与用户交互。
@@ -114,6 +121,8 @@ Phase-2 provisional execution policy：
 - `max_turns=30`。
 
 以上 policy 是 Phase-2 mechanism，不是 architecture invariant；正式 memory namespace、tool capability、event routing 与 max-turn policy 在进入执行能力时重新裁决。
+
+Phase 3 在既有只读工具之外，仅给 TeamAgent per-instance policy 增加 `send_team_message(target_id, content)` 和 `receive_team_message()`。Handler 从 `ToolContext.runtime` 查找 LifecycleManager 持有的 wrapper，验证 runtime 对象身份后使用其 handle；成功发送返回 JSON `{"status":"sent"}`，接收返回 JSON `{"message": ...}`（空队列为 `null`），typed domain error 转为含异常类型名的明确工具错误文本。工具不加入 Master / 普通 Subagent 的通用集合。工具调用或消息收发不自动触发 TeamAgent 执行。
 
 
 # 3. 架构和运行时 Contract

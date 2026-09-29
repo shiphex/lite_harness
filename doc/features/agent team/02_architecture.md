@@ -105,6 +105,7 @@ Agent
 - Identity 属于 AgentRuntime。由 AgentRuntime 初始化(session_id、agent_name、agent_id)。
 - TeamAgent 是被动 execution wrapper，持有既有 AgentRuntime 并以 `run(prompt)` 进入统一 `query_loop`；spawn 不启动线程，也不立即调用模型。
 - TeamAgent 不直接与用户交互。Phase 2 的工具、memory、event sink 与 max-turn 配置只是可替换机制，不是长期 architecture invariant。
+- Phase 3 为每个已发布 TeamAgent 绑定独立 MailboxHandle，并仅向 TeamAgent policy 注入消息收发工具；调用工具或收发消息本身不启动 `run()` 或改变 MemberState。
 
 
 ## 2.3 Mailbox 边界设计
@@ -120,6 +121,8 @@ Agent
             MailboxHandle.receive()
 ```
 Agent “拥有 mailbox 能力”，但不拥有 mailbox 数据结构本身。
+
+Phase 3 中，TeamRuntime 的 MessageBus 只查询同一 TeamRuntime 的 MemberRegistry。LifecycleManager 在取得实际 `agent_id` 后创建绑定身份的 MailboxHandle，随被动 TeamAgent wrapper 发布。Bus 按需创建有界 FIFO mailbox；同步收发由 bus 锁保护，不提供磁盘持久化。不存在的目标、不可用的成员、满队列和无效消息均以 typed domain error 显式拒绝。并发 shutdown 与消息投递的跨模块原子性留给 Phase 5。
 
 ## 2.4 LifecycleManager 边界设计
 
