@@ -43,6 +43,8 @@ TaskStore 集成约束：
 - 未显式注入 store 的现有工具调用继续使用全局 `TASKS`，保持向后兼容。
 - 不复制第二套 task state、task transition 或 task behavior，也不引入 Scheduler。
 
+Phase-4 team operation：`claim_task_strict(task_id, owner, *, store) -> Task` 与 `complete_task_strict(task_id, owner, *, store) -> TaskCompletion` 通过 typed `TaskError` 子类报告冲突；`TaskCompletion` 包含已完成任务与解锁的任务主题。同一进程同一 TaskStore 的创建、读取、依赖更新、领取和完成受同一可重入锁保护。旧 `claim_task` / `complete_task` 文本接口继续由严格入口适配，默认全局 `TASKS` 路径不变。不承诺跨进程文件事务。
+
 
 ## 2.3 MessageBus Protocol
 MessageBus 需要的函数：
@@ -122,6 +124,8 @@ Phase-2 provisional execution policy：
 
 以上 policy 是 Phase-2 mechanism，不是 architecture invariant；正式 memory namespace、tool capability、event routing 与 max-turn policy 在进入执行能力时重新裁决。
 
+Phase 4 允许 TeamAgent 使用现有 `bash`、`write_file`、`edit_file`，并增加绑定所属 TeamRuntime TaskStore 的 `get_team_task`、`create_team_task`、`update_team_task`、`complete_team_task`。TeamAgent 的 `bash` 仅允许前台执行；其 RunPolicy 禁止启动后台命令和读取进程全局的后台结果队列，避免跨 runtime 泄漏。这些团队任务工具从 `ToolContext.runtime` 验证 wrapper 身份；完成工具仅接受当前执行轮的任务 ID，以实际 `agent_id` 完成任务，再由 TeamAgent 来源提交 `TASK_FINISHED`。不暴露自主 claim。
+
 Phase 3 在既有只读工具之外，仅给 TeamAgent per-instance policy 增加 `send_team_message(target_id, content)` 和 `receive_team_message()`。Handler 从 `ToolContext.runtime` 查找 LifecycleManager 持有的 wrapper，验证 runtime 对象身份后使用其 handle；成功发送返回 JSON `{"status":"sent"}`，接收返回 JSON `{"message": ...}`（空队列为 `null`），typed domain error 转为含异常类型名的明确工具错误文本。工具不加入 Master / 普通 Subagent 的通用集合。工具调用或消息收发不自动触发 TeamAgent 执行。
 
 
@@ -155,6 +159,7 @@ use-case API：
 ## 3.3 Master Team Tool Contract
 
 - `spawn_teammate` 只注入 MasterAgent instance 的 allowed tool set / handler binding，不加入通用工具集合，也不暴露给 TeamAgent 或普通 Subagent。
+- Phase 4 以相同 per-instance binding 增加 `create_team_task(subject, description="")`、`list_team_tasks()`、`get_team_task(task_id)`、`assign_team_task(task_id, agent_id)`、`resume_team_task(task_id, agent_id)`；它们校验调用 session 并仅使用当前 TeamRuntime。分配与续跑同步返回 JSON，包含 `status`、`task_id`、`agent_id`、`task_status`、`member_state`、`run_reason` 和可选错误。成功的团队任务读写工具返回 JSON；可预期错误返回含类型名的明确文本。
 - handler 从 `ToolContext` 取得调用方 Master AgentRuntime，并调用 `TeamCoordinator.spawn_teammate(...)`。
 - `create_master_runtime()` 只提供通用的 per-instance tool definition / handler 注入 seam，不依赖或持有 TeamRuntime。
 

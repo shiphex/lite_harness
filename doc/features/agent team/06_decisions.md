@@ -304,6 +304,29 @@ Consequences:
 - Phase 3 可以用 fake runtime 与显式工具调用验证消息垂直链路，无需真实模型。
 - MessageBus 不拥有 AgentRuntime 或生命周期；跨模块 shutdown 竞态留待 Phase 5。
 
-Review source: [Human_Review.md TASK-04 DD-01～DD-04](Human_Review.md)
+Review source: [_history/TASK-04_human-review.md DD-01～DD-04](_history/TASK-04_human-review.md)
 
 
+## ADR-012 Phase-4 显式任务分配与恢复
+
+Status:
+Accepted
+
+Context:
+Phase 4 需要把 Master 看板、TeamRuntime-owned TaskStore 和既有 TeamAgent.run 连接起来；TASK-05 预检中的 DD-01～DD-05 尚未确定同步触发、工具边界和部分成功处理。
+
+Decision:
+- Master 使用专属团队工具创建、查看、分配和显式续跑任务；TeamAgent 使用专属团队任务工具查看、创建、更新依赖与完成，不自主领取。TeamAgent 同时获得现有工作区编辑与前台命令工具；其 runtime 不使用进程全局后台命令队列。
+- 团队任务 owner 是实际 `agent_id`。分配同步调用一次 TeamAgent.run，任务指令直接作为 prompt，不向 mailbox 额外通知。
+- 同一进程同一 TaskStore 的领取互斥，旧全局工具路径和文本接口兼容；不承诺跨进程原子性。
+- 部分成功保留真实任务与成员状态；未完成或执行异常时只允许原 owner 显式续跑。完成后成员状态转换失败时，只重试收尾转换。
+
+Alternatives:
+- 分配后只发送消息或启动后台 worker：本阶段不采用；需要额外执行与监督语义。
+- 失败后自动退回 pending：本阶段不采用；会掩盖已发生的执行副作用。
+
+Consequences:
+- Master 工具调用等待一次 TeamAgent turn；同一成员的任务执行互斥。
+- TeamRuntime 仍隔离任务状态；MemberRegistry 仍是成员状态唯一 owner。
+
+Review source: [_history/TASK-05_human-review.md](_history/TASK-05_human-review.md)

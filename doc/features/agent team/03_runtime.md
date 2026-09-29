@@ -120,11 +120,16 @@ MasterAgent
 TaskStore.claim/assign(...)
 
 MasterAgent
-    ↓ notify
-MessageBus
+    ↓ TeamCoordinator: claim → Registry BUSY → TeamAgent.run(task prompt)
+TeamAgent
+    ↓ complete_team_task: TaskStore complete → Registry IDLE
 ```
 
 以上 Team 路径操作 TeamRuntime 持有的 team-scoped TaskStore。现有 task-system operation 通过显式 store 注入复用；未显式注入时仍保留绑定全局 `TASKS` 的既有工具路径。具体采用函数参数、bound handler 或薄 adapter，延后到对应 Phase 决定。
+
+Phase 4 中 Master 可先在 team store 创建任务，再从看板查看并指定本团队 IDLE 成员的实际 `agent_id` 分配。分配同步等待一次 `TeamAgent.run(prompt)`；任务指令直接作为 prompt，不写 mailbox。任务执行期间，TeamAgent 可使用其团队任务工具和现有工作区工具。
+
+执行异常或一轮结束仍未完成时，任务保持 `in_progress`、原 owner 不变，成员保持 BUSY；Master 仅可对同一 owner 显式续跑。若领取已持久化但 BUSY 转换失败，续跑先重试该转换；若任务已完成但 IDLE 转换失败，续跑只重试收尾转换，不再运行任务。不可恢复的状态冲突明确返回实际状态和错误；不自动退回 `pending`。
 
 相关函数(已经在 task_system 中实现)：
 ``` python

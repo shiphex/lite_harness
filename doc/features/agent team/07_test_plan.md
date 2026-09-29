@@ -41,6 +41,11 @@ E2E smoke:
 - [√] F-MSG-03 → unknown sender or STARTING / STOPPED / FAILED member rejected without state change
 - [√] F-MSG-04 → empty、non-string and over 16,384-character content rejected
 - [√] F-STATE-01 → test_invalid_member_transition_rejected_without_state_change
+- [ ] F-TASK-01 → 同一任务重复或并发领取产生明确冲突且仅一个 owner 成功
+- [ ] F-TASK-02 → 领取已提交但 BUSY 转换失败，返回真实状态，原 owner 可显式续跑
+- [ ] F-TASK-03 → 执行异常或一轮未完成，保持 `in_progress` / BUSY 并允许原 owner 续跑
+- [ ] F-TASK-04 → 完成已提交但 IDLE 转换失败，续跑仅修复成员状态
+- [ ] F-TASK-05 → 非 owner、跨团队成员及同成员重入被拒绝且目标状态不变
 
 
 # 4. 测试项目
@@ -77,6 +82,14 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 - [√] REGISTRY-02 `unregister` 仅可用于 spawn 发布前 rollback 或 TeamRuntime 最终释放
 - [√] SPAWN-01 Master tool → TeamCoordinator → LifecycleManager → RuntimeFactory → MemberRegistry 的整链 fake-runtime 测试返回 IDLE member
 - [√] MASTER-TOOL-01 `spawn_teammate` 只通过 per-instance binding 暴露给 Master，不进入通用 / Subagent / TeamAgent tool set
+- [ ] COLLAB-01 Master 团队创建/看板/详情/分配 → 同步 TeamAgent turn → 完成任务并返回 IDLE；分配不写 mailbox
+- [ ] COLLAB-02 TeamAgent 团队任务工具验证实际 runtime / owner，工作区编辑与命令工具可路由，无自主领取
+- [ ] COLLAB-03 同一 TaskStore 并发领取恰有一个成功；旧全局任务工具仍兼容
+- [ ] COLLAB-04 执行异常、未完成和部分成功后，原 owner 的显式续跑与状态修复正确
+- [ ] COLLAB-05 任务不存在、依赖未完成、目标成员不可用、跨 TeamRuntime 与重复完成均被拒绝
+- [ ] COLLAB-06 同一成员执行期间不能重入；不同成员的任务状态仍按各自 owner 维护
+- [ ] COLLAB-07 TeamAgent 的 bash 仅前台执行，不能启动或接收其他 runtime 的全局后台命令结果
+- [ ] COLLAB-08 Master/TeamAgent 创建工具对非字符串任务主题和描述返回可预期错误，不中断 loop
 
 # 4.3 成功标准
 `doc\features\agent team\01_problem.md` 中的 `# 4. Success Criteria`
@@ -87,8 +100,8 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 |state| Requirement | Architecture | Contract | Failure | ADR | Test | Task |
 |---|---|---|---|---|---|---|---|
 | [√] | SC-01 spawn | architecture 1.1/2.1/2.4/2.5 | contract 2.4/2.5/3.1/3.3 | F-SPAWN-01/02 | ADR-001/002/007/008/010 | STATE-01/REGISTRY-02/SPAWN-01/MASTER-TOOL-01 | TASK-03 |
-| [ ] | SC-02 统一 AgentRuntime / query_loop | architecture 1.1/2.2 | contract 2.6 | - | ADR-007/009 | ARCH-04 | TASK-03 |
+| [ ] | SC-02 统一 AgentRuntime / query_loop | architecture 1.1/2.2 | contract 2.6/3.1/3.3 | F-TASK-02/03/04 | ADR-007/009/012 | ARCH-04、COLLAB-01/04 | TASK-03 / TASK-05 |
 | [√] | SC-03 messaging | architecture 2.3 | contract 2.1/2.3/2.6 | F-MSG-01/02/03/04 | ADR-004/006/011 | ARCH-02、MSG-01/02/03、MSG-TOOL-01 | TASK-04 |
 | [ ] | SC-04 lifecycle entry | architecture 2.4/2.5 | contract 2.4/2.5 | F-SPAWN-01/02、F-STOP-01/F-STATE-01 | ADR-002/005/010 | STATE-03/04/06/07、ARCH-03、REGISTRY-01/02 | TASK-03 / TASK-06 |
-| [ ] | SC-05 no cross-module state mutation | architecture 2.3/2.5 | contract 2.2/2.3/2.5 | F-MSG-01/02/03、F-STATE-01 | ADR-002/003/004/011 | ARCH-02/06、STORE-01/02、REGISTRY-01、MSG-03 | TASK-04 / TASK-05 / TASK-06 |
+| [ ] | SC-05 no cross-module state mutation | architecture 2.3/2.5 | contract 2.2/2.3/2.5 | F-MSG-01/02/03、F-STATE-01、F-TASK-05 | ADR-002/003/004/011/012 | ARCH-02/06、STORE-01/02、REGISTRY-01、MSG-03、COLLAB-02/03/05/06 | TASK-04 / TASK-05 / TASK-06 |
 

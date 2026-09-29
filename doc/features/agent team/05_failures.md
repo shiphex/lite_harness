@@ -21,6 +21,10 @@
 | F-MSG-03 | sender missing or sender/target STARTING、STOPPED、FAILED | MessageBus | sender | reject with `MessageUnavailableError` | no enqueue / no state change |
 | F-MSG-04 | empty、non-string or over 16,384-character content | MessageBus | sender | reject with `InvalidMessageError` | no enqueue |
 | F-TASK-01 | task already claimed | TaskStore | caller | conflict | retry/read |
+| F-TASK-02 | 领取成功但成员转 BUSY 失败 | TeamCoordinator | Master | 保留 `in_progress` 与原 owner，返回实际 task/member 状态；同一 owner 用 `resume_team_task` 重试转换 | 不虚报执行；不自动退回 pending |
+| F-TASK-03 | 执行异常或一轮结束未完成 | TeamCoordinator | Master | 保留 `in_progress` / BUSY；同一 owner 显式续跑 | 可观察错误或未完成结果 |
+| F-TASK-04 | 任务完成但成员转 IDLE 失败 | TeamAgent / MemberRegistry | Master | 保留 completed 任务事实和 BUSY 成员；`resume_team_task` 只重试 `TASK_FINISHED` | 不重复执行或重复完成 |
+| F-TASK-05 | 非 owner、跨团队成员或同成员重入 | TeamCoordinator / TeamAgent tool | caller | 明确拒绝；不改变目标任务或成员状态 | typed conflict / error |
 | F-STATE-01 | invalid member state transition | MemberRegistry | caller | reject；保持原状态 | typed error/result |
 | F-STOP-01 | worker won't stop | LifecycleManager | Coordinator | force cleanup policy；通过 MemberRegistry 记录终态 | queryable FAILED/STOPPED record |
 

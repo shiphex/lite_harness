@@ -84,6 +84,8 @@ TeamCoordinator MemberRegistry      MessageBus
 - Coordinator = orchestration / use-case 层，负责协调，不负责实现所有东西
 - TaskStore：共享任务存储，用于存储和管理团队任务(create_task、claim_task、update_task、get_task、list_tasks)，底层复用已有 task_system；每个 TeamRuntime 使用独立的 team-scoped TaskStore。
 - Team 路径通过显式 store 注入复用现有 task operation，同时保留当前绑定全局 `TASKS` 的工具路径兼容性；不得复制第二套 task state 或 task behavior。
+- Phase 4 的任务协作由 TeamCoordinator 编排：Master 专属工具创建、查看、分配和显式续跑；领取与完成仍由现有 task_system 修改任务，成员状态仍仅由 MemberRegistry 修改。LifecycleManager 只提供已发布 TeamAgent wrapper 的查询，不承担任务调度。
+- 同步任务执行复用 TeamAgent 的既有 `run(prompt)` 与 query_loop；分配指令直接传入 run，不在 MessageBus 另存一份通知。每个成员同一时刻只允许一轮任务执行，成员之间可分别执行。
 - LifecycleManager：负责“怎么创建/停止 worker”
 - MemberRegistry：负责“现在有哪些 worker”
 - MessageBus：负责各个团队成员之间的消息传递
