@@ -77,6 +77,14 @@ class SpawnError(TeamError):
     """TeamAgent spawn transaction 失败时抛出。"""
 
 
+class StopBusyError(TeamError):
+    """TeamAgent 正在执行同步 turn，不能立即停止。"""
+
+
+class StopPendingTaskError(TeamError):
+    """成员仍有未完成或待恢复的任务状态。"""
+
+
 class MessageTargetNotFoundError(TeamError):
     """消息目标不属于当前 TeamRuntime。"""
 

@@ -145,6 +145,11 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
     assert created_with["session_id"] == "session1"
     assert [tool["name"] for tool in created_with["additional_tools"]] == [
         "spawn_teammate",
+        "shutdown_teammate",
+        "teardown_team",
+        "report_team_fatal",
+        "get_team_member",
+        "recover_failed_team_task",
         "create_team_task",
         "list_team_tasks",
         "get_team_task",
@@ -158,6 +163,11 @@ def test_master_agent_passes_runtime_and_outputs_final_text(monkeypatch, tmp_pat
         "get_team_task",
         "assign_team_task",
         "resume_team_task",
+        "shutdown_teammate",
+        "teardown_team",
+        "report_team_fatal",
+        "get_team_member",
+        "recover_failed_team_task",
     }
     assert set(created_with) == {
         "events",
@@ -204,3 +214,40 @@ def test_master_agent_accepts_exit_inputs(monkeypatch, exit_input):
     agent.master_agent()
 
     assert [item.type for item in events] == [EventType.SYSTEM_MESSAGE]
+
+
+def test_master_exit_waits_for_successful_team_teardown(monkeypatch, tmp_path):
+    from team import runtime as team_module
+
+    events = []
+    inputs = iter(["q", "hello", "exit"])
+    teardown_results = iter([
+        {"status": "partial", "released": False, "failures": {"worker": {"type": "StopPendingTaskError", "message": "unfinished"}}},
+        {"status": "released", "released": True, "failures": {}},
+    ])
+    calls = []
+
+    class FakeTeam:
+        def __init__(self, *args, **kwargs):
+            self.coordinator = SimpleNamespace(teardown_team=lambda: next(teardown_results))
+
+    runtime = SimpleNamespace(
+        session_id="session", agent_id="agent",
+        state=state(messages=[], context={}, current_model={"model_name": "model"}),
+        memory=SimpleNamespace(index_path=tmp_path / "MEMORY.md"),
+        events=SimpleNamespace(emit=events.append),
+        interaction=SimpleNamespace(get_user_input=lambda message=">> ": next(inputs)),
+        hooks=SimpleNamespace(run=lambda *args: None),
+        begin_run=lambda: None,
+    )
+    monkeypatch.setattr(team_module, "TeamRuntime", FakeTeam)
+    monkeypatch.setattr(agent, "create_master_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr(agent.config, "Config", _config(tmp_path))
+    monkeypatch.setattr(agent.builtin, "update_context", lambda context, **kwargs: context)
+    monkeypatch.setattr(agent.hook, "make_hook_context", lambda current: None)
+    monkeypatch.setattr(agent, "query_loop", lambda current: (calls.append(True) or current.state, {"reason": "completed"}))
+
+    agent.master_agent()
+
+    assert len(calls) == 1
+    assert any("StopPendingTaskError" in str(item.data) for item in events)

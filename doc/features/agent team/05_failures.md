@@ -9,6 +9,7 @@
 - MemberRegistry 必须拒绝非法 MemberState transition，且拒绝后保持原状态不变
 - STOPPED / FAILED member record 必须保留到 TeamRuntime 最终释放
 - Phase-2 spawn rollback 保证逻辑资源 / ownership cleanup；当前不承诺删除 RuntimeFactory 已创建的 filesystem diagnostic artifacts
+- 正常停止与正常 `q/exit` 不得使原 owner 的未完成任务失去续跑入口；无法安全停止时保留 TeamRuntime 并报告失败
 
 
 # 2. 具体 Failure Policy
@@ -26,11 +27,15 @@
 | F-TASK-04 | 任务完成但成员转 IDLE 失败 | TeamAgent / MemberRegistry | Master | 保留 completed 任务事实和 BUSY 成员；`resume_team_task` 只重试 `TASK_FINISHED` | 不重复执行或重复完成 |
 | F-TASK-05 | 非 owner、跨团队成员或同成员重入 | TeamCoordinator / TeamAgent tool | caller | 明确拒绝；不改变目标任务或成员状态 | typed conflict / error |
 | F-STATE-01 | invalid member state transition | MemberRegistry | caller | reject；保持原状态 | typed error/result |
-| F-STOP-01 | worker won't stop | LifecycleManager | Coordinator | force cleanup policy；通过 MemberRegistry 记录终态 | queryable FAILED/STOPPED record |
+| F-STOP-01 | 活动同步 turn 无法停止 | LifecycleManager | Master / Coordinator | 返回 `StopBusyError`；不强制中断、不改变 member/task 或 wrapper ownership；本轮结束后重试 | 不虚报 STOPPED；仍可续跑 |
+| F-STOP-02 | 原 owner 有 `in_progress` 任务或完成后的成员收尾未恢复 | LifecycleManager / Coordinator | Master | 拒绝正常停止并保留 Registry；可运行的原 owner 显式续跑/修复，FAILED owner 的任务按 F-STOP-05 交接给新成员后重试 | 不留下不可续跑任务 |
+| F-STOP-03 | teardown 中有成员停止或清理失败 | Coordinator / TeamRuntime | Master | 继续处理其他成员，汇总逐成员失败；保留 TeamRuntime 与终态记录以供重试，正常 `q/exit` 拒绝退出 | 不提前报告最终释放 |
+| F-STOP-04 | 明确不可恢复的 runtime 故障 | LifecycleManager | Master / runtime supervisor | 报告 `FATAL_RUNTIME_ERROR`，保留 FAILED record、错误摘要与任务事实；普通执行异常仍走 F-TASK-03。若仍有 `in_progress` 任务，正常 teardown 拒绝最终释放 | fatal 可观察，不伪造可恢复执行或安全退出 |
+| F-STOP-05 | FAILED 成员任务交接失败 | TeamCoordinator / TaskStore / LifecycleManager | Master | spawn 失败保留原任务；交接前失败停止新建空闲成员；交接后状态转换或执行失败保留新 owner 与可续跑成员，逐项重试或再次显式恢复 | 不丢 owner / 交接记录；现有 IDLE 成员不受影响 |
 
 F-SPAWN-01 / F-SPAWN-02 的 “no leaked worker” 指 LifecycleManager 不再保留可达的 TeamAgent wrapper / AgentRuntime。由于当前 AgentRuntime 没有 `destroy()` / `close()` contract，失败前由 RuntimeFactory 创建的 runtime diagnostic directories 可以保留，不视为 Phase-2 rollback failure。
 
-Phase 3 的 bus 锁仅保证单次队列操作原子；与未来并发 shutdown 的跨模块线性化不在本阶段承诺范围，Phase 5 必须重新审阅该竞态。
+Phase 3 的 bus 锁只保证单次队列操作原子。Phase 5 已接受的设计要求把消息检查/队列操作与 shutdown / fatal transition 排序：终态转换后的收发明确拒绝，已接受消息到 TeamRuntime 最终释放前不静默丢弃。无后台 worker 或 AgentRuntime 强制关闭契约，不以强制清理代替 F-STOP-01 的可观察拒绝。
 
 
 # 3. 必然面对的 P0 failures

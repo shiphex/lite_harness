@@ -26,6 +26,48 @@ TEAM_MASTER_TOOLS = [
         },
     },
     {
+        "name": "shutdown_teammate",
+        "description": "停止一个 TeamAgent，并保留可查询的成员终态。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"agent_id": {"type": "string"}},
+            "required": ["agent_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "teardown_team",
+        "description": "安全停止并释放当前团队；失败时返回逐成员原因，保留会话供恢复。",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "report_team_fatal",
+        "description": "显式报告 TeamAgent 不可恢复的运行故障。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"agent_id": {"type": "string"}, "error": {"type": "string"}},
+            "required": ["agent_id", "error"], "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_team_member",
+        "description": "查询团队成员状态、故障摘要及其任务 ID。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"agent_id": {"type": "string"}},
+            "required": ["agent_id"], "additionalProperties": False,
+        },
+    },
+    {
+        "name": "recover_failed_team_task",
+        "description": "为 FAILED 成员的未完成任务创建全新 TeamAgent 并同步执行一轮。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"task_id": {"type": "string"}},
+            "required": ["task_id"], "additionalProperties": False,
+        },
+    },
+    {
         "name": "create_team_task",
         "description": "在当前团队创建任务。",
         "input_schema": {
@@ -127,6 +169,31 @@ def bind_team_handlers(team_runtime: TeamRuntime) -> dict:
             agent_id,
         )
 
+    def shutdown_teammate(context: ToolContext, agent_id: str) -> str:
+        def operation():
+            member = team_runtime.coordinator.shutdown_teammate(agent_id)
+            return {
+                "status": "stopped" if member.state.value == "stopped" else "failed",
+                "agent_id": member.agent_id,
+                "member_state": member.state,
+            }
+        return task_result(context, operation)
+
+    def teardown_team(context: ToolContext) -> str:
+        return task_result(context, team_runtime.coordinator.teardown_team)
+
+    def report_team_fatal(context: ToolContext, agent_id: str, error: str) -> str:
+        return task_result(context, team_runtime.coordinator.report_fatal, agent_id, error)
+
+    def get_team_member(context: ToolContext, agent_id: str) -> str:
+        return task_result(context, team_runtime.coordinator.get_member, agent_id)
+
+    def recover_failed_team_task(context: ToolContext, task_id: str) -> str:
+        return task_result(
+            context, team_runtime.coordinator.recover_failed_task,
+            task_id, parent_runtime=context.runtime,
+        )
+
     return {
         "spawn_teammate": spawn_teammate,
         "create_team_task": create_team_task,
@@ -134,4 +201,9 @@ def bind_team_handlers(team_runtime: TeamRuntime) -> dict:
         "get_team_task": get_team_task,
         "assign_team_task": assign_team_task,
         "resume_team_task": resume_team_task,
+        "shutdown_teammate": shutdown_teammate,
+        "teardown_team": teardown_team,
+        "report_team_fatal": report_team_fatal,
+        "get_team_member": get_team_member,
+        "recover_failed_team_task": recover_failed_team_task,
     }

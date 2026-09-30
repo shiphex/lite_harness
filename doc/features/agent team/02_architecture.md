@@ -124,7 +124,7 @@ Agent
 ```
 Agent “拥有 mailbox 能力”，但不拥有 mailbox 数据结构本身。
 
-Phase 3 中，TeamRuntime 的 MessageBus 只查询同一 TeamRuntime 的 MemberRegistry。LifecycleManager 在取得实际 `agent_id` 后创建绑定身份的 MailboxHandle，随被动 TeamAgent wrapper 发布。Bus 按需创建有界 FIFO mailbox；同步收发由 bus 锁保护，不提供磁盘持久化。不存在的目标、不可用的成员、满队列和无效消息均以 typed domain error 显式拒绝。并发 shutdown 与消息投递的跨模块原子性留给 Phase 5。
+Phase 3 中，TeamRuntime 的 MessageBus 只查询同一 TeamRuntime 的 MemberRegistry。LifecycleManager 在取得实际 `agent_id` 后创建绑定身份的 MailboxHandle，随被动 TeamAgent wrapper 发布。Bus 按需创建有界 FIFO mailbox；同步收发由 bus 锁保护，不提供磁盘持久化。不存在的目标、不可用的成员、满队列和无效消息均以 typed domain error 显式拒绝。Phase 5 已接受的设计要求：消息状态检查与入队/出队相对 shutdown / fatal transition 使用共同顺序边界；转换之后的收发必须拒绝，已接受消息保留到 TeamRuntime 最终释放。MessageBus 仍只拥有队列，MemberRegistry 仍只拥有成员状态。
 
 ## 2.4 LifecycleManager 边界设计
 
@@ -150,6 +150,10 @@ MemberRegistry
 ```
 
 Phase 2 中，LifecycleManager 创建 AgentRuntime 与被动 TeamAgent wrapper，完成 Registry `STARTING → IDLE` 发布事务，并在 commit 前失败时逆序释放逻辑 ownership。RuntimeFactory 已创建的诊断目录不属于当前 cleanup contract。
+
+Phase 5 已接受的生命周期设计：Master 专属入口经 Coordinator 请求 LifecycleManager 停止成员。活动同步 turn、原 owner 的 `in_progress` 任务或已完成但成员收尾转换尚未恢复时，拒绝正常停止并保留可续跑 wrapper；正常 `q/exit` 的 teardown 如遇此类失败也拒绝退出。普通执行异常继续按 Phase 4 显式续跑；只有明确不可恢复的 runtime 故障经 LifecycleManager 报告为 FAILED。Teardown 逐成员 best-effort 处理并汇总失败，失败时保持 TeamRuntime 可恢复；全部安全停止后才最终释放 Registry record 与内存 mailbox，TaskStore session 文件保留。当前 AgentRuntime 没有强制中断或 close contract，不引入后台 worker。
+
+FAILED 成员仍拥有 `in_progress` 任务时，Master 可逐项显式请求恢复。Coordinator 校验旧 owner 与任务后，委托 LifecycleManager 创建全新的 TeamAgent，在 team-scoped TaskStore 内原子记录 owner 交接，再令新成员同步执行一轮；既有 IDLE 成员及其上下文不参与。新成员只使用任务内容和共享工作区，不继承失败成员的消息历史。交接后原 FAILED record 留存到最终释放；若新成员未完成，正常退出继续等待其续跑或再次显式恢复。
 
 ## 2.5 MemberRegistry 边界设计
 

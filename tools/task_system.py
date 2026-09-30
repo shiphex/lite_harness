@@ -2,11 +2,13 @@
 
 """
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
+import os
 import secrets
 import json
 import re
+import tempfile
 from threading import RLock
 from .tool_class import ToolContext
 import config
@@ -30,6 +32,10 @@ class TaskDependencyBlocked(TaskError):
 
 class TaskCompletionConflict(TaskError):
     """任务状态或完成者与领取记录不符。"""
+
+
+class TaskReassignmentConflict(TaskError):
+    """失败任务的 owner 或状态已经改变。"""
 
 
 def _validate_task_id(task_id: str) -> str:
@@ -57,6 +63,7 @@ class Task:
     status: str          # pending | in_progress | completed
     owner: str | None    # 负责当前任务的 Agent
     blockedBy: list[str] # 依赖的任务 ID 列表
+    reassignments: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -445,6 +452,40 @@ def claim_task_strict(task_id: str, owner: str, *, store: TaskStore) -> Task:
         task.owner = owner
         task.status = "in_progress"
         store.save(task)
+        return task
+
+
+def reassign_failed_task_strict(
+    task_id: str, expected_owner: str, new_owner: str, *, store: TaskStore
+) -> Task:
+    """原子保存失败任务的新 owner 和交接记录；故障分类由 Coordinator 校验。"""
+    with store._lock:
+        task = store.load(task_id)
+        if task.status != "in_progress" or task.owner != expected_owner:
+            raise TaskReassignmentConflict("任务已完成或 owner 已变化，不能改派")
+        if not isinstance(new_owner, str) or not new_owner or new_owner == expected_owner:
+            raise TaskReassignmentConflict("新 owner 必须不同于原 owner")
+        task.owner = new_owner
+        task.reassignments.append({
+            "from_owner": expected_owner,
+            "to_owner": new_owner,
+            "reason": "source_failed",
+        })
+        try:
+            target = store._path(task.id, create_root=True)
+            descriptor, temporary = tempfile.mkstemp(
+                prefix=f".{task.id}.", suffix=".tmp", dir=target.parent
+            )
+        except OSError as exc:
+            raise TaskError(f"任务交接准备失败: {exc}") from exc
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(asdict(task), handle, indent=2, ensure_ascii=False)
+            os.replace(temporary, target)
+        except OSError as exc:
+            raise TaskError(f"任务交接写入失败: {exc}") from exc
+        finally:
+            Path(temporary).unlink(missing_ok=True)
         return task
 
 

@@ -46,6 +46,11 @@ E2E smoke:
 - [√] F-TASK-03 → 执行异常或一轮未完成，保持 `in_progress` / BUSY 并允许原 owner 续跑
 - [√] F-TASK-04 → 完成已提交但 IDLE 转换失败，续跑仅修复成员状态
 - [√] F-TASK-05 → 非 owner、跨团队成员及同成员重入被拒绝且目标状态不变
+- [ ] F-STOP-01 → 活动同步 turn 拒绝停止，不虚报 STOPPED，原 owner 仍可续跑
+- [ ] F-STOP-02 → 未完成任务或待恢复成员收尾拒绝停止；正常退出保留会话
+- [ ] F-STOP-03 → teardown 逐成员汇总失败，未清理完不得最终释放，可重试
+- [ ] F-STOP-04 → 明确 fatal 保留 FAILED / 错误与任务事实，普通执行异常不误判
+- [ ] F-STOP-05 → FAILED 任务显式恢复的 spawn / 交接前失败保留旧 owner；交接后失败保留新 owner 与续跑入口
 
 
 # 4. 测试项目
@@ -91,6 +96,17 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 - [√] COLLAB-07 TeamAgent 的 bash 仅前台执行，不能启动或接收其他 runtime 的全局后台命令结果
 - [√] COLLAB-08 Master/TeamAgent 创建工具对非字符串任务主题和描述返回可预期错误，不中断 loop
 
+- [ ] STOP-01 Master 专属停止工具 → Coordinator → LifecycleManager → Registry；IDLE 成员停止后 record 为 STOPPED、wrapper 不可执行，重复停止幂等
+- [ ] STOP-02 活动同步 turn 的停止被拒绝；未完成或收尾未恢复任务保留原 owner / wrapper，显式续跑或修复后可停止
+- [ ] STOP-03 正常 `q/exit` 遇未完成任务或 teardown 失败时报告并保留会话；恢复后可退出
+- [ ] STOP-04 普通执行异常与显式 fatal 区分；fatal 保留 FAILED record、错误摘要与任务事实
+- [ ] STOP-05 teardown best-effort 汇总、部分失败重试、终态 record 保留与全部安全停止后的 `TEAM_RELEASE`；session TaskStore 文件保留
+- [ ] STOP-06 并发 send/receive 与 shutdown/fatal 有共同顺序边界，终态后拒绝收发、此前已接受消息保留至最终释放且无死锁
+- [ ] STOP-07 生命周期工具仅 Master 可用，跨 TeamRuntime member/session 与最终释放后的操作被拒绝
+- [ ] STOP-08 Master 对 FAILED 的 `in_progress` 任务逐项创建全新 TeamAgent 并立即执行；原 FAILED record 与现有 IDLE 成员上下文保持不变，完成后 teardown 可释放
+- [ ] STOP-09 交接记录兼容旧任务文件并持久保存；重复/并发恢复只有一个成功，spawn / 文件写入 / 成员转换失败分别保持正确 owner 与续跑入口
+- [ ] STOP-10 新成员未完成可续跑、再次 FAILED 可再次显式恢复；普通执行异常和非本团队任务不得通过恢复入口改派
+
 # 4.3 成功标准
 `doc\features\agent team\01_problem.md` 中的 `# 4. Success Criteria`
 
@@ -102,6 +118,6 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 | [√] | SC-01 spawn | architecture 1.1/2.1/2.4/2.5 | contract 2.4/2.5/3.1/3.3 | F-SPAWN-01/02 | ADR-001/002/007/008/010 | STATE-01/REGISTRY-02/SPAWN-01/MASTER-TOOL-01 | TASK-03 |
 | [√] | SC-02 统一 AgentRuntime / query_loop | architecture 1.1/2.2 | contract 2.6/3.1/3.3 | F-TASK-02/03/04 | ADR-007/009/012 | ARCH-04、COLLAB-01/04 | TASK-03 / TASK-05 |
 | [√] | SC-03 messaging | architecture 2.3 | contract 2.1/2.3/2.6 | F-MSG-01/02/03/04 | ADR-004/006/011 | ARCH-02、MSG-01/02/03、MSG-TOOL-01 | TASK-04 |
-| [ ] | SC-04 lifecycle entry | architecture 2.4/2.5 | contract 2.4/2.5 | F-SPAWN-01/02、F-STOP-01/F-STATE-01 | ADR-002/005/010 | STATE-03/04/06/07、ARCH-03、REGISTRY-01/02 | TASK-03 / TASK-06 |
-| [ ] | SC-05 no cross-module state mutation | architecture 2.3/2.5 | contract 2.2/2.3/2.5 | F-MSG-01/02/03、F-STATE-01、F-TASK-05 | ADR-002/003/004/011/012 | ARCH-02/06、STORE-01/02、REGISTRY-01、MSG-03、COLLAB-02/03/05/06 | TASK-04 / TASK-05 / TASK-06 |
+| [ ] | SC-04 lifecycle entry | architecture 2.4/2.5 | contract 2.4/2.5/3.1/3.3 | F-SPAWN-01/02、F-STOP-01～05、F-STATE-01 | ADR-002/005/010/013/014/015 | STATE-03/04/06/07、ARCH-03、REGISTRY-01/02、STOP-01～05/07～10 | TASK-03 / TASK-06 |
+| [ ] | SC-05 no cross-module state mutation | architecture 2.3/2.5 | contract 2.2/2.3/2.5 | F-MSG-01/02/03、F-STATE-01、F-TASK-05、F-STOP-02/03/05 | ADR-002/003/004/011/012/013/014/015 | ARCH-02/06、STORE-01/02、REGISTRY-01、MSG-03、COLLAB-02/03/05/06、STOP-02/05/06/08/09 | TASK-04 / TASK-05 / TASK-06 |
 

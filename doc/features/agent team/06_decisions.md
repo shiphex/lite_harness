@@ -330,3 +330,75 @@ Consequences:
 - TeamRuntime 仍隔离任务状态；MemberRegistry 仍是成员状态唯一 owner。
 
 Review source: [_history/TASK-05_human-review.md](_history/TASK-05_human-review.md)
+
+
+## ADR-013 Phase-5 正常停止与 fatal 分类
+
+Status:
+Accepted
+
+Context:
+Phase 4 的任务由 Master 同步触发，普通执行异常保留 `in_progress` / BUSY 供原 owner 续跑；现有 AgentRuntime 没有强制中断或 close contract。直接停止有任务的成员会留下不可续跑任务，用户明确禁止这种结果。
+
+Decision:
+- Master 专属停止入口经 Coordinator 委托 LifecycleManager；MemberRegistry 仍是 MemberState 唯一 owner。成功正常停止保留 STOPPED record 到 TeamRuntime 最终释放；重复停止幂等。
+- 活动同步 turn 返回 `StopBusyError`。仍有原 owner `in_progress` 任务，或已完成任务的成员收尾转换未恢复时，拒绝正常停止并保留 wrapper / 状态；Master 让可恢复的原 owner 显式续跑或修复后重试。不自动重置或改派任务；FAILED owner 的后续显式恢复见 ADR-015。
+- 正常 `q/exit` 的 teardown 如遇上述停止失败，报告实际状态并拒绝退出，保留会话供恢复。
+- 普通 query loop 异常继续按 F-TASK-03 / 04 恢复；只有明确不可恢复的 runtime 故障由 LifecycleManager 报告 `FATAL_RUNTIME_ERROR`，保留 FAILED record、错误摘要与任务事实。
+
+Alternatives:
+- 停止 BUSY 成员但保留不可续跑任务：用户拒绝。
+- 引入后台 worker、强制中断或自动任务改派：当前同步 runtime 与 TaskStore 契约不支持，本阶段不采用。
+
+Consequences:
+- 停止、teardown 与正常退出可能被活动执行或未恢复任务拒绝；调用方必须先处理任务再重试。
+- fatal 与普通可恢复执行异常有不同的可观察结果；无法检测的进程崩溃不由此保证自动恢复。
+
+Review source: [_history/TASK-06_human-review.md](_history/TASK-06_human-review.md) DD-01～DD-03 / DD-06
+
+
+## ADR-014 Phase-5 teardown 与消息终态顺序
+
+Status:
+Accepted
+
+Context:
+Phase 3 的 MessageBus 只保证单次队列操作原子，与 Registry 的终态转换没有共同顺序；teardown 的部分失败若提前释放 team，会失去终态和任务恢复入口。
+
+Decision:
+- Teardown 逐成员 best-effort 停止并汇总失败；任何停止或清理失败都保留 TeamRuntime 及可查询 STOPPED / FAILED record 供重试。全部成员安全停止且逻辑 ownership 清理后才以 `TEAM_RELEASE` 最终释放 Registry record 与内存 mailbox；session TaskStore 文件保留。重复 teardown 幂等。
+- 消息状态检查和队列操作与 shutdown / fatal transition 使用共同顺序边界。终态转换前已接受的消息可留到最终释放，转换后的 send/receive 必须拒绝；MessageBus 仍只拥有 mailbox，Registry 仍只拥有 MemberState。
+
+Alternatives:
+- Teardown 遇首个失败即中断或静默释放：不满足 best-effort 汇总和可恢复性。
+- 只检查一次 Registry 状态而允许随后并发入队：不能保证终态后的消息拒绝。
+
+Consequences:
+- Teardown 需要可重试的部分结果；消息与终态转换之间需要可测试的同步边界。
+- 内存 mailbox 在最终释放时清空，不提供持久化或跨进程事务。
+
+Review source: [_history/TASK-06_human-review.md](_history/TASK-06_human-review.md) DD-04～DD-05
+
+
+## ADR-015 FAILED 任务由新 TeamAgent 显式恢复
+
+Status:
+Accepted
+
+Context:
+FAILED 成员不再有可续跑 wrapper；若仍拥有 `in_progress` 任务，正常 teardown 按 DD-02 拒绝最终释放。现有 IDLE 成员可能有自己的上下文，不应直接接手。
+
+Decision:
+- Master 逐项调用 `recover_failed_team_task(task_id)`。仅当任务为 `in_progress` 且原 owner 是本团队 FAILED 成员时，由 LifecycleManager 创建全新 `recovery_<task_id>` TeamAgent；不自动扫描任务，也不使用现有 IDLE 成员。
+- TaskStore 在同进程锁内保持任务 ID / 状态 / 依赖，原子保存新 owner 和按顺序追加的 `reassignments` 记录。旧文件缺省空记录；不继承失败成员的聊天历史。新成员使用任务内容和共享工作区，交接成功后同步执行一轮。
+- spawn 或交接前失败保留旧 owner，并安全停止已发布但未接任务的新成员；交接后失败保留新 owner / 任务事实，允许其续跑或在再次 FAILED 后重新显式恢复。原 FAILED record 留到 TeamRuntime 最终释放。
+
+Alternatives:
+- 使用现有 IDLE 成员接手：用户拒绝，避免影响其上下文。
+- 自动改派全部失败任务：与 Master 显式恢复和既有任务边界不符。
+
+Consequences:
+- 任务文件新增可选交接记录；正常退出只在所有当前 owner 的任务安全完成后释放团队。
+- 新 TeamAgent 拥有独立 AgentRuntime / state / history；共享工作区已有副作用不自动回滚。
+
+Review source: [_history/TASK-06_recovery-review.md](_history/TASK-06_recovery-review.md) CR-02

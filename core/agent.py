@@ -154,7 +154,21 @@ def master_agent():
             break
         normalized_input = user_input.strip().lower()
         if not normalized_input or normalized_input in ("q", "exit"):
-            break
+            try:
+                close_result = team_runtime.coordinator.teardown_team()
+                if close_result["released"]:
+                    break
+                reason = close_result["failures"]
+            except Exception as exc:
+                reason = {"teardown": {"type": type(exc).__name__, "message": str(exc)}}
+            runtime.events.emit(
+                event.make_event(
+                    runtime,
+                    event.EventType.SYSTEM_MESSAGE,
+                    trigger=f"团队尚未安全停止，请恢复后重试退出：{reason}",
+                )
+            )
+            continue
         
         # 执行 UserPromptSubmit hook
         runtime.hooks.run(

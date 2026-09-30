@@ -1,8 +1,8 @@
 """Team-level use case 的 orchestration dependency boundary。"""
 
 from typing import TYPE_CHECKING
+from contextlib import ExitStack
 import json
-from threading import Lock, RLock
 
 from tools.task_system import (
     TaskStore,
@@ -10,6 +10,7 @@ from tools.task_system import (
     create_task,
     list_tasks,
     load_task,
+    reassign_failed_task_strict,
 )
 
 from .contracts import (
@@ -42,8 +43,6 @@ class TeamCoordinator:
         self.message_bus = message_bus
         self.task_store = task_store
         self.lifecycle_manager = lifecycle_manager
-        self._execution_locks: dict[str, Lock] = {}
-        self._locks_guard = RLock()
 
     def spawn_teammate(
         self,
@@ -58,18 +57,29 @@ class TeamCoordinator:
             agent_name=agent_name,
         )
 
+    def shutdown_teammate(self, agent_id: str) -> MemberRecord:
+        return self.lifecycle_manager.shutdown(agent_id)
+
+    def teardown_team(self) -> dict:
+        return self.lifecycle_manager.teardown()
+
+    def report_fatal(self, agent_id: str, error: str) -> dict:
+        return self.lifecycle_manager.report_fatal(agent_id, error)
+
+    def get_member(self, agent_id: str) -> dict:
+        return self.lifecycle_manager.member_status(agent_id)
+
     def create_task(self, subject: str, description: str = ""):
-        return create_task(subject, description, store=self.task_store)
+        with self.lifecycle_manager.operation():
+            return create_task(subject, description, store=self.task_store)
 
     def list_tasks(self):
-        return list_tasks(store=self.task_store)
+        with self.lifecycle_manager.operation():
+            return list_tasks(store=self.task_store)
 
     def get_task(self, task_id: str):
-        return load_task(task_id, store=self.task_store)
-
-    def _execution_lock(self, agent_id: str) -> Lock:
-        with self._locks_guard:
-            return self._execution_locks.setdefault(agent_id, Lock())
+        with self.lifecycle_manager.operation():
+            return load_task(task_id, store=self.task_store)
 
     def assign_task(self, task_id: str, agent_id: str) -> dict:
         return self._execute_task(task_id, agent_id, resume=False)
@@ -77,12 +87,56 @@ class TeamCoordinator:
     def resume_task(self, task_id: str, agent_id: str) -> dict:
         return self._execute_task(task_id, agent_id, resume=True)
 
+    def recover_failed_task(self, task_id: str, *, parent_runtime: "AgentRuntime") -> dict:
+        """显式创建全新成员接手 FAILED owner 的未完成任务。"""
+        with ExitStack() as execution_guard:
+            with self.lifecycle_manager.operation():
+                task = load_task(task_id, store=self.task_store)
+                if task.status != "in_progress" or task.owner is None:
+                    raise TeamError("只能恢复 FAILED 成员的未完成任务")
+                previous_owner = task.owner
+                if self.member_registry.get(previous_owner).state is not MemberState.FAILED:
+                    raise TeamError("任务原 owner 尚未进入 FAILED 状态")
+                member = self.lifecycle_manager.spawn(
+                    parent_runtime=parent_runtime,
+                    agent_name=f"recovery_{task.id}",
+                )
+                try:
+                    agent = execution_guard.enter_context(
+                        self.lifecycle_manager.execution(member.agent_id)
+                    )
+                    task = reassign_failed_task_strict(
+                        task.id, previous_owner, member.agent_id, store=self.task_store
+                    )
+                except Exception as exc:
+                    execution_guard.close()
+                    try:
+                        self.lifecycle_manager.shutdown(member.agent_id)
+                    except Exception as cleanup_exc:
+                        raise TeamError(
+                            f"任务交接失败: {exc}; 新成员清理失败: {cleanup_exc}"
+                        ) from exc
+                    raise
+                try:
+                    self.member_registry.transition(
+                        member.agent_id,
+                        MemberEvent.TASK_CLAIMED,
+                        source=TransitionSource.TEAM_COORDINATOR,
+                    )
+                except Exception as exc:
+                    result = self._result(
+                        "transition_error", task.id, member.agent_id,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
+                    result["previous_owner"] = previous_owner
+                    return result
+            result = self._run_task_turn(task, member.agent_id, agent)
+            result["previous_owner"] = previous_owner
+            return result
+
     def _execute_task(self, task_id: str, agent_id: str, *, resume: bool) -> dict:
-        agent = self.lifecycle_manager.get_agent(agent_id)
-        lock = self._execution_lock(agent_id)
-        if not lock.acquire(blocking=False):
-            raise TeamError(f"TeamAgent {agent_id!r} 正在执行另一轮任务")
-        try:
+        self.lifecycle_manager.ensure_open()
+        with self.lifecycle_manager.execution(agent_id) as agent:
             member = self.member_registry.get(agent_id)
             task = load_task(task_id, store=self.task_store)
             owned_active = {
@@ -138,30 +192,29 @@ class TeamCoordinator:
                         error=f"{type(exc).__name__}: {exc}",
                     )
 
-            agent.active_task_id = task_id
-            prompt = json.dumps(
-                {
-                    "task_id": task.id,
-                    "subject": task.subject,
-                    "description": task.description,
-                    "instruction": "执行此任务；完成后调用 complete_team_task。",
-                },
-                ensure_ascii=False,
+            return self._run_task_turn(task, agent_id, agent)
+
+    def _run_task_turn(self, task, agent_id: str, agent) -> dict:
+        agent.active_task_id = task.id
+        prompt = json.dumps(
+            {
+                "task_id": task.id,
+                "subject": task.subject,
+                "description": task.description,
+                "instruction": "执行此任务；完成后调用 complete_team_task。",
+            },
+            ensure_ascii=False,
+        )
+        try:
+            _, run_status = agent.run(prompt)
+            return self._result("turn_finished", task.id, agent_id, run_status)
+        except Exception as exc:
+            return self._result(
+                "execution_error", task.id, agent_id,
+                error=f"{type(exc).__name__}: {exc}",
             )
-            try:
-                _, run_status = agent.run(prompt)
-                return self._result("turn_finished", task_id, agent_id, run_status)
-            except Exception as exc:
-                return self._result(
-                    "execution_error",
-                    task_id,
-                    agent_id,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-            finally:
-                agent.active_task_id = None
         finally:
-            lock.release()
+            agent.active_task_id = None
 
     def _result(
         self,

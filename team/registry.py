@@ -114,6 +114,17 @@ class MemberRegistry:
                 )
             return self._members.pop(agent_id)
 
+    def release_all(self, *, reason: UnregisterReason) -> tuple[MemberRecord, ...]:
+        """最终释放时一次性移除全部终态 record。"""
+        if reason is not UnregisterReason.TEAM_RELEASE:
+            raise UnauthorizedMemberOperationError("仅 TEAM_RELEASE 可最终释放全部成员")
+        with self._lock:
+            members = tuple(self._members.values())
+            if any(member.state not in {MemberState.STOPPED, MemberState.FAILED} for member in members):
+                raise InvalidMemberTransitionError("不能释放未进入终态的成员")
+            self._members.clear()
+            return members
+
     def get(self, agent_id: str) -> MemberRecord:
         """返回指定 member 的 immutable snapshot。"""
 

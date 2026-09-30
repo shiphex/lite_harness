@@ -45,6 +45,8 @@ TaskStore 集成约束：
 
 Phase-4 team operation：`claim_task_strict(task_id, owner, *, store) -> Task` 与 `complete_task_strict(task_id, owner, *, store) -> TaskCompletion` 通过 typed `TaskError` 子类报告冲突；`TaskCompletion` 包含已完成任务与解锁的任务主题。同一进程同一 TaskStore 的创建、读取、依赖更新、领取和完成受同一可重入锁保护。旧 `claim_task` / `complete_task` 文本接口继续由严格入口适配，默认全局 `TASKS` 路径不变。不承诺跨进程文件事务。
 
+Phase-5 显式恢复使用 `reassign_failed_task_strict(task_id, expected_owner, new_owner, *, store)`：调用方先确认原 owner 为本团队 FAILED 成员；TaskStore 在同进程锁内校验 `in_progress` 与预期 owner，并一次保存新 owner 及 `reassignments` 交接记录。记录依序包含 `from_owner`、`to_owner` 和 `reason: "source_failed"`；旧任务文件缺少该字段时默认为空列表。交接写入以同目录临时文件替换，失败时原任务文件保持完整；不改变任务 ID、状态或依赖，不扩展跨进程事务承诺。
+
 
 ## 2.3 MessageBus Protocol
 MessageBus 需要的函数：
@@ -57,7 +59,7 @@ MessageBus 需要的函数：
 
 图表示逻辑消息路径；Agent 实际通过 MailboxHandle 使用该能力，不直接访问 MessageBus 内部 mailbox。
 
-`MessageBus(registry: MemberRegistry, *, capacity: int = 100)` 只查询所属 TeamRuntime 的 Registry；capacity 必须是正整数。每个 mailbox 是同步加锁的内存 FIFO 队列，按需创建；send / receive 分别在 bus 内原子执行，不承诺与并发 shutdown 的跨模块线性化。空队列返回 `None`，满队列立即抛 `MailboxFullError` 且原队列不变；不阻塞、不重试、不持久化。
+`MessageBus(registry: MemberRegistry, *, capacity: int = 100)` 只查询所属 TeamRuntime 的 Registry；capacity 必须是正整数。每个 mailbox 是同步加锁的内存 FIFO 队列，按需创建；send / receive 分别在 bus 内原子执行。Phase 5 要求状态检查及队列操作与 shutdown / fatal transition 共享顺序边界：转换之前完成的消息可以留在队列，之后的收发必须拒绝；mailbox 直到 TeamRuntime 最终释放才清空。空队列返回 `None`，满队列立即抛 `MailboxFullError` 且原队列不变；不阻塞、不重试、不持久化。
 
 不存在的 target 抛 `MessageTargetNotFoundError`。不存在或处于 STARTING / STOPPED / FAILED 的 sender，以及处于这些状态的 target，抛 `MessageUnavailableError`。IDLE / BUSY / WAITING 成员可收发。无效 content 抛 `InvalidMessageError`；上述错误均继承 `TeamError`。消息操作不调用 `MemberRegistry.transition()`。
 
@@ -65,8 +67,10 @@ MessageBus 需要的函数：
 ## 2.4 LifecycleManager Protocol
 LifecycleManager 需要的函数：
 - `spawn(*, parent_runtime: AgentRuntime, agent_name: str) -> MemberRecord`
-- shutdown()
-- teardown()
+- `shutdown(agent_id: str) -> MemberRecord`
+- `report_fatal(agent_id: str, error: str) -> status result`
+- `member_status(agent_id: str) -> status result`
+- `teardown() -> result`（Coordinator 向 Master 暴露结果）
 
 Phase-2 `spawn` contract：
 - LifecycleManager 是 TeamAgent AgentRuntime 的唯一创建入口。
@@ -74,7 +78,9 @@ Phase-2 `spawn` contract：
 - 创建并持有被动 TeamAgent wrapper / AgentRuntime 的逻辑 ownership。
 - Registry `STARTING → IDLE` 是 commit；commit 前失败按 `05_failures.md` 逆序 rollback。
 - 失败使用 `SpawnError(TeamError)`；不得 silent failure。
-- `shutdown()` / `teardown()` 的行为留到 Phase 5，Phase 2 不提前实现。
+- Phase 5 的正常 shutdown 校验当前没有活动 turn、原 owner 未完成任务或待修复的成员收尾；否则返回 typed failure，保留 wrapper、Registry 状态与任务 owner。重复停止保持同一终态。
+- `report_fatal` 只用于明确不可恢复的 runtime 故障；普通 query loop 异常沿用 Phase 4 的 BUSY / 原 owner 续跑。fatal 保留 FAILED record 与错误摘要，不凭普通异常自动分类。
+- teardown 对各成员 best-effort 处理并汇总失败；失败时不最终释放 TeamRuntime。即使成员已明确 FAILED，只要原 owner 仍有 `in_progress` 任务，正常退出也返回部分失败并保留故障现场。全部安全停止后才通过 `TEAM_RELEASE` 移除 record 并清空 mailbox，TaskStore 文件保留；重复 teardown 幂等。最终释放的 registry/mailbox 清理失败时须恢复此前已接受的 mailbox 与终态 record 供重试。
 
 
 ## 2.5 MemberRegistry Protocol
@@ -85,6 +91,7 @@ MemberRegistry 需要的函数：
 - `get_member_state(agent_id: str) -> MemberState`
 - `list() -> tuple[MemberRecord, ...]`
 - `transition(agent_id: str, event: MemberEvent, *, source: TransitionSource) -> MemberRecord`
+- `release_all(*, reason: UnregisterReason) -> tuple[MemberRecord, ...]`（仅在全部成员进入终态后一次性移除）
 
 相关 contract types：
 - `MemberRecord` 是 immutable member snapshot，以 `agent_id` 为 registry key，并保存 `agent_name` 与 `MemberState`。
@@ -136,9 +143,11 @@ use-case API：
 - `spawn_teammate(*, parent_runtime: AgentRuntime, agent_name: str) -> MemberRecord`
 - shutdown_teammate(...)
 - teardown_team(...)
+- report_fatal(...) / get_member(...)
+- recover_failed_task(task_id, *, parent_runtime: AgentRuntime)
 - assign_task(...)
 
-`spawn_teammate` 只负责编排并委托 `LifecycleManager.spawn(...)`；Coordinator 不直接创建 runtime、不持有 worker，也不调用 LLM。其余 API 的具体行为留到对应 Phase。
+`spawn_teammate` 只负责编排并委托 `LifecycleManager.spawn(...)`；Coordinator 不直接创建 runtime、不持有 worker，也不调用 LLM。Phase 5 的 `shutdown_teammate` 委托 LifecycleManager，`teardown_team` 汇总逐成员停止与释放结果；活动任务不得通过正常停止遗留为不可续跑。任务分配与续跑沿用 Phase 4 契约。
 
 
 ## 3.2 TeamRuntime Invariants
@@ -162,6 +171,10 @@ use-case API：
 - Phase 4 以相同 per-instance binding 增加 `create_team_task(subject, description="")`、`list_team_tasks()`、`get_team_task(task_id)`、`assign_team_task(task_id, agent_id)`、`resume_team_task(task_id, agent_id)`；它们校验调用 session 并仅使用当前 TeamRuntime。分配与续跑同步返回 JSON，包含 `status`、`task_id`、`agent_id`、`task_status`、`member_state`、`run_reason` 和可选错误。成功的团队任务读写工具返回 JSON；可预期错误返回含类型名的明确文本。
 - handler 从 `ToolContext` 取得调用方 Master AgentRuntime，并调用 `TeamCoordinator.spawn_teammate(...)`。
 - `create_master_runtime()` 只提供通用的 per-instance tool definition / handler 注入 seam，不依赖或持有 TeamRuntime。
+
+Phase 5 通过同一 Master-only binding 增加 `shutdown_teammate(agent_id)`、`teardown_team()`、`report_team_fatal(agent_id, error)` 与 `get_team_member(agent_id)`。工具校验当前 session，返回实际 member / task 状态与失败原因；可预期的拒绝不报告成功。正常 `q/exit` 调用 teardown；若有未完成任务或其他停止失败，向 Master 报告并保持会话。可运行的原 owner 显式续跑；FAILED owner 的任务按下述恢复入口交接给新成员。任务完成或故障修复后重试退出。最终释放后，除重复 teardown 外的团队工具拒绝操作。
+
+`recover_failed_team_task(task_id)` 也只绑定 Master：仅处理 FAILED owner 的 `in_progress` 任务，自动创建名称为 `recovery_<task_id>` 的全新 TeamAgent，返回新 `agent_id`、原 owner 与实际任务/成员状态。交接前失败不得改写原任务；交接后成员转换失败须保留新 owner 和可续跑入口。普通执行异常仍只允许原 owner 续跑，恢复不会使用现有 IDLE 成员或复制失败成员的聊天历史。
 
 
 

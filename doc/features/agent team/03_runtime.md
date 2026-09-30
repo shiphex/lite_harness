@@ -84,7 +84,7 @@ team agent 的 State Machine 转移表：
 | BUSY | dependency_wait | dependency exists | WAITING | create_task, update_task |
 | WAITING | dependency_resolved | — | BUSY | resume |
 | BUSY | task_finished | — | IDLE | publish result |
-| IDLE/BUSY/WAITING | shutdown | can_stop | STOPPED | record terminal state / emit stopped |
+| IDLE/BUSY/WAITING | shutdown | can_stop（无活动 turn、无原 owner 未完成任务、无待恢复的完成收尾） | STOPPED | record terminal state / emit stopped |
 | IDLE/BUSY/WAITING | fatal_runtime_error | — | FAILED | record failure / emit event |
 
 触发权限表：
@@ -103,6 +103,10 @@ team agent 的 State Machine 转移表：
 `STARTING` record 由 `register()` 创建；只有 LifecycleManager 可以提交 `spawn_success`。IDLE 表示 spawn 已完成并可被后续能力使用，不表示 TeamAgent 已开始执行任务。
 
 正常 shutdown 后的 STOPPED record，以及 fatal runtime error 后的 FAILED record，在 TeamRuntime 生命周期结束前必须仍可通过 MemberRegistry 查询。`unregister` 不属于正常 shutdown 或 fatal transition 的副作用，仅用于 spawn 发布成功前的 rollback，或 TeamRuntime 最终释放。
+
+Phase 5 的 `can_stop` 在 LifecycleManager / Coordinator 用例边界校验，不由 Registry 猜测 TaskStore 状态。活动同步 turn 返回 `StopBusyError`；仍有原 owner `in_progress` 任务，或任务已完成但成员收尾转换未恢复时，拒绝正常停止并保留 wrapper 和成员状态，Master 先用原 owner 显式续跑或修复后重试。正常 `q/exit` 的 teardown 如有此类失败，报告结果并保持会话，不留下因正常停止而不可续跑的任务。普通执行异常仍按 F-TASK-03 / 04 恢复，不自动转 FAILED；明确不可恢复的 runtime 故障由 LifecycleManager 报告 fatal 并保留 FAILED record。
+
+若 FAILED 成员仍有 `in_progress` 任务，Master 可调用 `recover_failed_team_task(task_id)`：校验原 owner 为 FAILED → 新建独立 TeamAgent → 保持任务 ID / 状态并持久记录 owner 交接 → 新成员 IDLE→BUSY → 同步运行一轮。原 FAILED 成员不复活，既有 IDLE 成员不接手。交接前失败时任务仍属于原 owner；交接后状态转换或执行失败时，新 owner 保留 `in_progress` 任务并可显式续跑；新成员再次 FAILED 时可再次恢复。
 
 
 ## 1.3 TaskStore 中任务被认领路径
@@ -208,3 +212,5 @@ TeamCoordinator
 LifecycleManager
 ```
 具体细节见 1.1～1.4 中的示例。
+
+Phase 5 的 teardown 对每个成员尽力停止并汇总失败；有失败则保留 TeamRuntime、未完成任务和可查询终态以供重试。全部成员安全停止且逻辑 ownership 清理后，才以 `TEAM_RELEASE` 移除 Registry record、释放内存 mailbox；session TaskStore 文件不删除。重复停止与重复 teardown 不产生第二次副作用。消息收发与 shutdown / fatal transition 的共同顺序边界保证转换后的收发被拒绝。

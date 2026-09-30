@@ -2,6 +2,7 @@
 
 from collections import deque
 from dataclasses import dataclass
+from contextlib import contextmanager
 from threading import RLock
 
 from .contracts import (
@@ -55,6 +56,27 @@ class MessageBus:
         """仅绑定身份；成员可用性在每次收发时检查。"""
 
         return MailboxHandle(self, agent_id)
+
+    @contextmanager
+    def state_change_guard(self):
+        """把终态转换与收发检查排进同一个顺序。"""
+        with self._lock:
+            yield
+
+    def release(self) -> None:
+        """仅在 TeamRuntime 最终释放时清空已接受的消息。"""
+        with self._lock:
+            self._mailboxes.clear()
+
+    def snapshot_mailboxes(self) -> dict[str, deque[TeamMessage]]:
+        """供最终释放事务回滚使用。"""
+        with self._lock:
+            return {agent_id: deque(messages) for agent_id, messages in self._mailboxes.items()}
+
+    def restore_mailboxes(self, snapshot: dict[str, deque[TeamMessage]]) -> None:
+        """最终释放失败后恢复此前已接受的消息。"""
+        with self._lock:
+            self._mailboxes = {agent_id: deque(messages) for agent_id, messages in snapshot.items()}
 
     def send(self, *, sender_id: str, target_id: str, content: str) -> None:
         if not isinstance(content, str) or not content.strip():
