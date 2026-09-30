@@ -22,7 +22,7 @@ Optional Real-model E2E Smoke 在 Phase 6 完成后执行，不阻塞 MVP。
 | [√] | Phase 2 | Spawn vertical slice             | Master → Coordinator → Lifecycle → Registry  | Spawn Vertical Slice |
 | [√] | Phase 3 | Messaging vertical slice         | TeamAgent → MailboxHandle → MessageBus       | Messaging Vertical Slice |
 | [√] | Phase 4 | Task collaboration               | MasterAgent + existing TaskStore + TeamAgent | Task Collaboration |
-| [ ] | Phase 5 | Shutdown / teardown / failures   | 生命周期和 rollback 闭环                      | Shutdown / Teardown / Failure Closure |
+| [√] | Phase 5 | Shutdown / teardown / failures   | 生命周期和 rollback 闭环                      | Shutdown / Teardown / Failure Closure |
 | [ ] | Phase 6 | Integration / architecture enforcement | SC、ARCH、Failure tests                | Integration / Architecture Enforcement |
 
 
@@ -63,73 +63,11 @@ Validated against: CF-01～CF-03 为 `70825632e033e64778d5373d6d8da2b619a56ad8`�
 
 # Next Gate
 
-TASK-05 / Phase 4 已完成验收，证据见 [`_history/TASK-05_completion.md`](_history/TASK-05_completion.md) 与 [`_history/TASK-05_completion-review.md`](_history/TASK-05_completion-review.md)。下方 [TASK-06 任务设计](#task-06-shutdown--teardown--failure-closure)已完成[原设计审阅](_history/TASK-06_human-review.md)和[FAILED 任务恢复补充审阅](_history/TASK-06_recovery-review.md)，并形成[实现报告](_history/TASK-06_completion.md)。下一道门槛是 [`Human_Review.md`](Human_Review.md) 的 TASK-06 完成审阅；Phase 5 未勾选。
+TASK-06 / Phase 5 已完成验收，证据见 [`_history/TASK-06_completion.md`](_history/TASK-06_completion.md) 与 [`_history/TASK-06_completion-review.md`](_history/TASK-06_completion-review.md)。下一道门槛是 TASK-07 Integration / Architecture Enforcement 预检；本轮尚未启动 TASK-07。
 
-# TASK-06 Shutdown / Teardown / Failure Closure
+# Active Task
 
-Status:
-Implementation Complete / Awaiting Completion Review
-
-Goal:
-在现有同步任务执行、成员状态和 team-scoped 消息能力之上，建立 Master 显式停止 TeamAgent、team teardown 与 fatal failure closure 的统一生命周期路径。停止或失败必须可观察，成员状态由 MemberRegistry 维护，任务事实由现有 TaskStore 维护，mailbox 由 MessageBus 维护；teardown 处理部分失败而不虚报完成。
-
-References:
-- REQUIREMENT: `01_problem.md` §2.1 Capability、§3 Non-goal、SC-04～SC-07
-- FACTS: 本文 `Current Facts` 与 `Accepted Design Constraints`；TASK-05 完成验收见 [`_history/TASK-05_completion-review.md`](_history/TASK-05_completion-review.md)
-- ARCH / RUNTIME: `02_architecture.md` §2.3～2.6、`03_runtime.md` §1.2～1.4 / §2
-- CONTRACT / FAILURE: `04_contracts.md` §2.2～2.5 / §3.1～3.3、`05_failures.md` §1、F-STOP-01～05、F-STATE-01、F-MSG-03、F-TASK-03～04
-- ADR / TEST: `06_decisions.md` ADR-013～015、`07_test_plan.md` STOP-01～10 / ARCH-02～03 及 SC-04～05 的追踪行
-- PREFLIGHT: [`_history/TASK-06_preflight.md`](_history/TASK-06_preflight.md)；已接受设计归档于 [`_history/TASK-06_human-review.md`](_history/TASK-06_human-review.md)，当前完成审阅入口为 [`Human_Review.md`](Human_Review.md)
-
-Preconditions:
-- TASK-05 / Phase 4 已完成审阅；Master 可显式分配任务，TeamCoordinator 同步运行一次 `TeamAgent.run(prompt)`，普通执行异常保留原 owner 的续跑路径。
-- 生命周期停止、teardown 与 fatal 主路径已实现；FAILED 成员持有任务的恢复补充设计见 [`_history/TASK-06_recovery-review.md`](_history/TASK-06_recovery-review.md)，完成验收仍待审阅。
-
-Allowed scope:
-- 设计接受后，在 `team/*` 建立 Coordinator → LifecycleManager 的停止、fatal 报告、teardown 与最终释放路径，以及 Registry / MessageBus / TaskStore 所需的最小受控协作接口。
-- 在 `tools/team.py` 中增加 Master 专属生命周期工具；仅为 Master session 收尾所需的最小连接允许修改 `core/agent.py`，不得改变统一 `AgentRuntime` / `query_loop` 的通用执行语义。
-- 增加 `tests/team/*` 与必要的 session / tool 边界测试；保持既有工具与任务行为兼容，完成后提交独立报告供完成审阅。
-
-Must:
-- 所有 TeamAgent 停止和 teardown 请求经过统一生命周期入口；MemberState 仅由 MemberRegistry 的受控 transition 改变，STOPPED / FAILED record 保留到 TeamRuntime 最终释放。
-- 保留已接受的 TASK-05 任务事实与恢复语义：普通执行异常、未完成任务和已完成但成员收尾失败必须呈现实际 task/member 状态，不得伪报完成或静默重置 owner。
-- shutdown / teardown 具有可观察、可重试的结果；teardown best-effort 处理每个成员并汇总失败，fatal runtime failure 有可查询的终态。
-- MessageBus 继续拥有 mailbox storage；成员终态后的消息行为与并发停止顺序按设计裁决定义，并以确定性测试证明。
-- 落实已接受的 DD-01～DD-06：活动 turn 与原 owner 未完成/待修复任务拒绝停止；正常 `q/exit` 拒绝在部分失败后结束会话；fatal、最终释放和消息顺序遵循 ADR-013 / ADR-014。
-- 按 CR-02 / ADR-015 让 Master 对 FAILED owner 的 `in_progress` 任务逐项创建全新 TeamAgent，原子记录 owner 交接并同步执行；交接失败保留明确且可恢复的任务归属，不动用现有 IDLE 成员。
-
-Must not:
-- 不把尚未实现的 Phase 5 行为、新增测试或成功标准标为已完成。
-- 不引入后台 worker、强制中断能力、Scheduler、自动扫描或自动任务重分配、消息驱动执行、持久消息、跨进程事务、worktree、idle timeout 或 token/cost eviction。Master 的逐项显式 FAILED 任务恢复按 ADR-015 执行。
-- 不绕过 Registry、TaskStore 或 MessageBus 直接修改成员、任务或 mailbox；不把正常 shutdown 当作 `unregister`，也不在失败未清理时提前宣称 team 已释放。
-- 不要求删除 RuntimeFactory 生成的 diagnostic artifacts，也不把可选真实模型 smoke 作为 Phase 5 的完成条件。
-
-Design review accepted:
-- [`_history/TASK-06_preflight.md`](_history/TASK-06_preflight.md) 保留原预检提案；用户的实际裁决归档于 [`_history/TASK-06_human-review.md`](_history/TASK-06_human-review.md)，并已传播至 02～07。下列条目是已接受设计，不代表已实现。
-
-| ID | 已接受裁决 |
-| --- | --- |
-| DD-01 | Master 专属停止/teardown 入口，LifecycleManager 持有 wrapper；正常退出尝试 teardown 并呈现失败。 |
-| DD-02 | 活动 turn、未完成任务或待恢复收尾拒绝停止；可运行的原 owner 显式续跑，FAILED owner 的任务按 ADR-015 恢复后重试。正常 `q/exit` 遇失败拒绝退出。 |
-| DD-03 | 普通执行异常可续跑；明确 fatal 才转 FAILED 并保留错误与任务事实。 |
-| DD-04 | Teardown best-effort 汇总；失败保留 team 供重试，全部安全停止后最终释放。 |
-| DD-05 | 消息与 shutdown/fatal transition 共用顺序边界，终态后拒绝收发。 |
-| DD-06 | 无后台 worker 强制关闭；活动同步 turn 返回可观察忙碌错误。 |
-
-- 用户在完成审阅期间接受补充设计 CR-02：Master 逐项创建全新 TeamAgent 恢复 FAILED 成员的未完成任务，现有 IDLE 成员不接手；归档见 [`_history/TASK-06_recovery-review.md`](_history/TASK-06_recovery-review.md) 与 ADR-015。CR-01 的原实现已获同意；CR-03 仍是完成审阅后的状态勾选门槛。
-
-- 完成审阅接受前，Phase 5、SC-04～SC-07 和新增检查项保持未完成；不得以既有 Registry 单元测试或预检回归结果替代 TASK-06 验收。
-
-Verify after acceptance and implementation:
-- 使用 fake runtime / fake loop 验证 Master 生命周期工具 → Coordinator → LifecycleManager → Registry 的完整路径，以及 IDLE、BUSY、WAITING、STOPPED、FAILED 的停止、重复停止与查询结果。
-- 覆盖活动同步执行、未完成任务、普通执行异常与 fatal 的区别；验证 TaskStore 中的 owner/status 和 Registry 中的成员状态不会被静默重置。
-- 注入逐成员停止和 teardown 清理失败，验证 best-effort 汇总、重试、最终释放边界及终态 record 的保留；并发 send/receive 与 shutdown/fatal 的行为按已接受裁决验证。
-- 验证 FAILED 任务的新成员恢复、旧任务文件兼容、交接记录持久化、重复/并发请求、spawn/写入/状态转换失败及再次 fatal；确保现有 IDLE 成员上下文不受影响。
-- 保持所有 `07_test_plan.md` 已勾选回归项通过，运行针对性与全量自动测试、compileall、`git diff --check`，并审查 diff 未引入 Non-goal 或 Phase 6 / 可选 smoke 能力。
-
-Handoff:
-- 设计审阅已按用户实际裁决归档并传播到 02～07、ADR、测试追踪及本文；已接受范围的实现与验证记录见 TASK-06 Completion Report。
-- [Completion Report](_history/TASK-06_completion.md) 已形成；其独立完成人工审阅接受前，TASK-06 保持进行中，Phase 5 与新测试不勾选；有证据的验收完成后才更新 Completed Tasks 和结束提交引用。
+暂无。TASK-07 的任务设计须在预检和设计审阅时建立。
 
 # Completed Tasks
 
@@ -140,3 +78,4 @@ Handoff:
 | TASK-03 Spawn Vertical Slice | Done / Phase 2 complete | `f8c76c4611e582e99245c9638f3dc5206db3e868` | _history/TASK-03_*.md |
 | TASK-04 Messaging Vertical Slice | Done / Phase 3 complete | `b007aa4be943ed6fa6ebade27b7f08a18cd94076` | _history/TASK-04_*.md |
 | TASK-05 Task Collaboration | Done / Phase 4 complete | `fbed4f01d15fd0e48c30480d0104f731ec9437f9` | [Completion report](_history/TASK-05_completion.md) / [Accepted review](_history/TASK-05_completion-review.md) |
+| TASK-06 Shutdown / Teardown / Failure Closure | Done / Phase 5 complete | `b17eb85400e98bf2b6cb51387dfd805bafc3a547` | [Completion report](_history/TASK-06_completion.md) / [Accepted review](_history/TASK-06_completion-review.md) |
