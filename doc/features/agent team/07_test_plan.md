@@ -29,6 +29,12 @@ E2E smoke:
 - 静态架构守卫针对已接受的 import/call 与模块责任边界使用 Python AST；运行时测试继续验证身份、隔离、状态所有权和兼容性。检查不把 TeamRuntime 的具体文件位置设为架构不变量。
 - TASK-07 完成审阅已接受，Phase 6 检查项及追踪行已有验证证据并标记 `[√]`；旧检查项与 `01_problem.md` 中已接受的 SC-06/07 勾选不回退。
 
+## 1.3 可选真实模型 smoke 边界
+
+- TASK-08 的 [DD-01～DD-03](_history/TASK-08_human-review.md) 已接受：通过显式入口在临时 workspace 中驱动 Master bound 工具，并由真实模型驱动 TeamAgent 的统一 query_loop。Master 工具调用由 smoke 入口驱动，Master 本身不调用模型。
+- 本地配置为 `api=openai`、`model_url=http://127.0.0.1:8000/v1`、`model_name=unsloth/Qwen3.5-4B-GGUF:UD-Q6_K_XL`、无鉴权占位值 `no-key`；服务变化时重新确认。一次 smoke 只执行一个任务，TeamAgent 最多 3 个 turn，每次最多 512 个输出 token。
+- `SMOKE-01` 默认不进入 pytest/CI；完成审阅接受前保持 `[ ]`。它是 MVP Phase 6 后的可选增量检查，不更改既有成功标准或已勾选阶段。
+
 # 2. State Machine Tests
 - [√] STATE-01 STARTING → IDLE allowed
 - [√] STATE-02 IDLE → BUSY allowed
@@ -124,6 +130,10 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 - [√] INTEG-01 Master bound handler 创建两个 TeamAgent，经各自消息工具收发，创建与分配任务，由 fake loop 完成，再安全 teardown；核对 session、独立 runtime、任务 owner、消息边界与最终释放。
 - [√] INTEG-02 任务 owner 持有 `in_progress` 后显式 fatal，首次 teardown 报告部分失败；Master 为该任务创建全新成员恢复完成，旧 FAILED record 保留至最终释放，交接与任务事实不丢失。
 
+# 4.5 可选真实模型 E2E smoke
+
+- [ ] SMOKE-01 显式运行本地真实模型 smoke：Master bound 工具创建一名 TeamAgent 和一项任务，TeamAgent 经统一 query_loop 触发 `complete_team_task`；核对至少一次真实模型响应、实际 owner、任务 `completed`、成员 IDLE 与 teardown 最终释放。服务、协议、工具调用或释放失败须记录真实结果，不把跳过计为通过。
+
 
 
 # 5. Traceability Matrix
@@ -136,4 +146,5 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 | [√] | SC-05 no cross-module state mutation | architecture 2.3/2.5 | contract 2.2/2.3/2.5 | F-MSG-01/02/03、F-STATE-01、F-TASK-05、F-STOP-02/03/05 | ADR-002/003/004/011/012/013/014/015 | ARCH-02/06、STORE-01/02、REGISTRY-01、MSG-03、COLLAB-02/03/05/06、STOP-02/05/06/08/09 | TASK-04 / TASK-05 / TASK-06 |
 | [√] | SC-06 happy path 与主要 failure path 的 Phase 6 增量验收 | architecture 2.1～2.6 | contract 2.1～3.3 | F-SPAWN-01/02、F-MSG-01～04、F-STATE-01、F-TASK-01～05、F-STOP-01～05 | ADR-007/011/012/013/014/015 | 既有 Failure/State/STOP 检查、INTEG-01/02 | TASK-07 |
 | [√] | SC-07 Non-goal 的 Phase 6 增量验收 | architecture 2.1/2.2/2.6 | contract 2.2/2.6 | — | ADR-003/005/006/012 | ARCH-07/08、COLLAB-02、MSG-03 | TASK-07 |
+| [ ] | SC-02/04/06 的可选真实模型增量验证；不改变已接受的 MVP 状态 | architecture 1.1/2.2/2.4/2.5 | contract 2.4/2.6/3.1/3.3 | F-TASK-03/04、F-STOP-02/03 | ADR-007/008/010/012/013/014 | SMOKE-01 | TASK-08 |
 

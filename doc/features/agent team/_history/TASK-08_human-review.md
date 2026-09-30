@@ -4,13 +4,13 @@ Status: Accepted Review
 
 Task: TASK-08 Optional Real-model E2E Smoke
 
-Based on: [_history/TASK-08_preflight.md](_history/TASK-08_preflight.md)
+Based on: [TASK-08_preflight.md](TASK-08_preflight.md)
 
 Result: 用户接受 DD-01～DD-03；设计已传播至 `07_test_plan.md` 与 `08_tasks.md`。`SMOKE-01` 保持 `[ ]`，真实模型 smoke 尚未实现或运行。
 
 Reviewer: User（2026-10-01 明确回复“同意DD-01～DD-03”）
 
-Superseded by: [07 测试计划](07_test_plan.md) §1.3 / §4.5 与 [08 当前任务](08_tasks.md) TASK-08；本审阅的归档副本见 [_history/TASK-08_human-review.md](_history/TASK-08_human-review.md)
+Superseded by: [07 测试计划](../07_test_plan.md) §1.3 / §4.5 与 [08 当前任务](../08_tasks.md) TASK-08
 
 Prepared by: Codex
 
@@ -18,8 +18,8 @@ Baseline: `4b575b6c437bdbbf3c82467ebf73b5099724caec` (`feature/team`)，预检�
 
 ## 审阅依据
 
-- TASK-07 / Phase 6 已接受，见[完成审阅](_history/TASK-07_completion-review.md)；全量 pytest 在当前基线为 **364 passed in 4.06s**。Phase 6 两条全链路测试使用 fake loop，真实模型 smoke 在现行 [07 测试计划](07_test_plan.md)中仍为可选项。
-- 当前 TeamAgent 默认进入统一 query_loop，经 adapter factory 调用模型；Master bound 工具能创建成员、任务并同步分配。具体入口、状态所有权和失败路径见[预检报告](_history/TASK-08_preflight.md)。
+- TASK-07 / Phase 6 已接受，见[完成审阅](TASK-07_completion-review.md)；全量 pytest 在当前基线为 **364 passed in 4.06s**。Phase 6 两条全链路测试使用 fake loop，真实模型 smoke 在现行 [07 测试计划](../07_test_plan.md)中仍为可选项。
+- 当前 TeamAgent 默认进入统一 query_loop，经 adapter factory 调用模型；Master bound 工具能创建成员、任务并同步分配。具体入口、状态所有权和失败路径见[预检报告](TASK-08_preflight.md)。
 - 用户启动的本地 llama.cpp 服务返回 `GET /health` 200、`GET /v1/models` 200；模型 ID 为 `unsloth/Qwen3.5-4B-GGUF:UD-Q6_K_XL`。建议经项目现有 OpenAI adapter 使用 `http://127.0.0.1:8000/v1` 与本地无鉴权占位值 `no-key`；尚未验证推理或 tool calling。
 
 ## 设计差异与裁决
