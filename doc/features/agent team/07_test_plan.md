@@ -23,6 +23,12 @@ E2E smoke:
 - 后续实现导致已勾选测试失败时，当前 Phase 不得完成；应修复回归，或通过 Design Change 流程更新已接受的 Contract、测试及其状态。
 - 单项勾选不表示 MVP 最终完成；Phase 6 负责全量集成验证，最终完成状态以 Traceability Matrix 与 Success Criteria 为准。
 
+## 1.2 Phase 6 验证边界
+
+- 按 TASK-07 已接受的 [DD-01～DD-03](_history/TASK-07_human-review.md)，使用 fake runtime/loop 串接 Master bound handler、TeamAgent 消息工具、任务与生命周期；不调用真实模型。真实模型 smoke 仍为 Phase 6 后可选项目。
+- 静态架构守卫针对已接受的 import/call 与模块责任边界使用 Python AST；运行时测试继续验证身份、隔离、状态所有权和兼容性。检查不把 TeamRuntime 的具体文件位置设为架构不变量。
+- 新增 Phase 6 检查项及追踪行在实现、验证和完成审阅接受前保持 `[ ]`；旧检查项与 `01_problem.md` 中已接受的 SC-06/07 勾选不回退。
+
 # 2. State Machine Tests
 - [√] STATE-01 STARTING → IDLE allowed
 - [√] STATE-02 IDLE → BUSY allowed
@@ -76,6 +82,9 @@ TeamRuntime 是独立的 team composition root，不并入 AgentRuntime；team-s
 - [√] ARCH-06:
 Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，不得定义第二套 task model 或引入 Scheduler。
 
+- [ ] ARCH-07: AST 守卫 Registry 对 RuntimeFactory 的依赖、TeamAgent runtime 的 LifecycleManager 单一创建入口、统一 query_loop 及 TeamAgent 不直接访问 Bus mailbox storage；现有行为测试继续验证边界。
+- [ ] ARCH-08: Team 路径不引入 worktree、Scheduler、TeamAgent 自主领取或 idle/token-cost 自动淘汰；在限定模块范围核对语法与执行能力。
+
 # 4.2 Contract / Isolation 测试
 - [√] MSG-01 两个已发布 TeamAgent 经各自 handle 和专属工具收发；空队列返回 `None`，FIFO 顺序正确
 - [√] MSG-02 两个 TeamRuntime 的 mailbox 与成员查询隔离，并发发送不丢失消息
@@ -110,6 +119,11 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 # 4.3 成功标准
 `doc\features\agent team\01_problem.md` 中的 `# 4. Success Criteria`
 
+# 4.4 Phase 6 集成验证
+
+- [ ] INTEG-01 Master bound handler 创建两个 TeamAgent，经各自消息工具收发，创建与分配任务，由 fake loop 完成，再安全 teardown；核对 session、独立 runtime、任务 owner、消息边界与最终释放。
+- [ ] INTEG-02 任务 owner 持有 `in_progress` 后显式 fatal，首次 teardown 报告部分失败；Master 为该任务创建全新成员恢复完成，旧 FAILED record 保留至最终释放，交接与任务事实不丢失。
+
 
 
 # 5. Traceability Matrix
@@ -120,4 +134,6 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 | [√] | SC-03 messaging | architecture 2.3 | contract 2.1/2.3/2.6 | F-MSG-01/02/03/04 | ADR-004/006/011 | ARCH-02、MSG-01/02/03、MSG-TOOL-01 | TASK-04 |
 | [√] | SC-04 lifecycle entry | architecture 2.4/2.5 | contract 2.4/2.5/3.1/3.3 | F-SPAWN-01/02、F-STOP-01～05、F-STATE-01 | ADR-002/005/010/013/014/015 | STATE-03/04/06/07、ARCH-03、REGISTRY-01/02、STOP-01～05/07～10 | TASK-03 / TASK-06 |
 | [√] | SC-05 no cross-module state mutation | architecture 2.3/2.5 | contract 2.2/2.3/2.5 | F-MSG-01/02/03、F-STATE-01、F-TASK-05、F-STOP-02/03/05 | ADR-002/003/004/011/012/013/014/015 | ARCH-02/06、STORE-01/02、REGISTRY-01、MSG-03、COLLAB-02/03/05/06、STOP-02/05/06/08/09 | TASK-04 / TASK-05 / TASK-06 |
+| [ ] | SC-06 happy path 与主要 failure path 的 Phase 6 增量验收 | architecture 2.1～2.6 | contract 2.1～3.3 | F-SPAWN-01/02、F-MSG-01～04、F-STATE-01、F-TASK-01～05、F-STOP-01～05 | ADR-007/011/012/013/014/015 | 既有 Failure/State/STOP 检查、INTEG-01/02 | TASK-07 |
+| [ ] | SC-07 Non-goal 的 Phase 6 增量验收 | architecture 2.1/2.2/2.6 | contract 2.2/2.6 | — | ADR-003/005/006/012 | ARCH-07/08、COLLAB-02、MSG-03 | TASK-07 |
 
