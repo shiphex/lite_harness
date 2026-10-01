@@ -30,6 +30,7 @@ class RunPolicy():
     - fallback_model: 失败时调用的模型
     - tools_list: 可以使用的工具的列表
     - can_ask_user: 是否可以询问用户问题
+    - allow_background_tools: 是否允许启动并接收进程全局后台命令结果
     """
     max_turns: int = 300
     prompt: str = ""
@@ -38,6 +39,7 @@ class RunPolicy():
     tools_list: List = field(default_factory=list)
     tool_handler: Dict = field(default_factory=dict)
     can_ask_user: bool = False
+    allow_background_tools: bool = True
 
 
 @dataclass()

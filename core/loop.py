@@ -335,14 +335,17 @@ def execute_tool(response: ModelResponse, runtime: AgentRuntime):
         )
 
         if tools.should_run_background(block.name, block.input):
-            try:
-                task_id = tools.start_background_task(block)
-                output = (
-                    f"[后台任务 {task_id} 已启动] "
-                    "结果将在稍后收集。"
-                )
-            except Exception as error:
-                output = f"错误: {error}"
+            if not runtime.policy.allow_background_tools:
+                output = "Error: background execution disabled for this runtime"
+            else:
+                try:
+                    task_id = tools.start_background_task(block)
+                    output = (
+                        f"[后台任务 {task_id} 已启动] "
+                        "结果将在稍后收集。"
+                    )
+                except Exception as error:
+                    output = f"错误: {error}"
         else:
             # 执行工具调用
             output = runtime.tools.execute(context = ToolContext(runtime), 
@@ -570,7 +573,8 @@ def query_loop(runtime: AgentRuntime):
         else:
             messages.append({"role": "user", "content": results})
 
-        tools.inject_background_results(messages)
+        if runtime.policy.allow_background_tools:
+            tools.inject_background_results(messages)
             
         # 更新上下文
 

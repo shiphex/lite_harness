@@ -2,11 +2,14 @@
 
 """
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
+import os
 import secrets
 import json
 import re
+import tempfile
+from threading import RLock
 from .tool_class import ToolContext
 import config
 
@@ -17,6 +20,22 @@ TASK_ID_RE = re.compile(TASK_ID_PATTERN)
 
 class TaskError(ValueError):
     """可预期的任务工具错误。"""
+
+
+class TaskClaimConflict(TaskError):
+    """任务已被领取或不再处于待领取状态。"""
+
+
+class TaskDependencyBlocked(TaskError):
+    """任务仍有未完成依赖。"""
+
+
+class TaskCompletionConflict(TaskError):
+    """任务状态或完成者与领取记录不符。"""
+
+
+class TaskReassignmentConflict(TaskError):
+    """失败任务的 owner 或状态已经改变。"""
 
 
 def _validate_task_id(task_id: str) -> str:
@@ -44,6 +63,13 @@ class Task:
     status: str          # pending | in_progress | completed
     owner: str | None    # 负责当前任务的 Agent
     blockedBy: list[str] # 依赖的任务 ID 列表
+    reassignments: list[dict[str, str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class TaskCompletion:
+    task: Task
+    unlocked_subjects: tuple[str, ...]
 
 
 class TaskStore:
@@ -54,6 +80,7 @@ class TaskStore:
             directory (Path): 任务存储根目录
         """
         self.directory = directory
+        self._lock = RLock()
 
     def _root(self, create: bool = False) -> Path:
         """ 获取任务存储根目录
@@ -94,6 +121,10 @@ class TaskStore:
         return self._path(task_id).is_file()
     
     def create(self, subject: str, description: str) -> Task:
+        with self._lock:
+            return self._create_unlocked(subject, description)
+
+    def _create_unlocked(self, subject: str, description: str) -> Task:
         """ 创建任务
 
         Args:
@@ -105,6 +136,10 @@ class TaskStore:
             ValueError: 任务主题不能为空
         """
         # 数据预处理
+        if not isinstance(subject, str):
+            raise TaskError("任务主题必须是字符串")
+        if not isinstance(description, str):
+            raise TaskError("任务描述必须是字符串")
         subject = subject.strip()
         if not subject:
             raise TaskError("任务主题不能为空")
@@ -154,6 +189,12 @@ class TaskStore:
     def update_dependencies(self, 
                             task_id: str, 
                             add_blocked_by: list[str])-> Task:
+        with self._lock:
+            return self._update_dependencies_unlocked(task_id, add_blocked_by)
+
+    def _update_dependencies_unlocked(self,
+                                      task_id: str,
+                                      add_blocked_by: list[str]) -> Task:
         """ 更新任务依赖
         
         Args:
@@ -193,6 +234,10 @@ class TaskStore:
         return task
 
     def save(self, task: Task) -> None:
+        with self._lock:
+            self._save_unlocked(task)
+
+    def _save_unlocked(self, task: Task) -> None:
         """ 保存任务
         
         Args:
@@ -204,6 +249,10 @@ class TaskStore:
         )
 
     def load(self, task_id: str) -> Task:
+        with self._lock:
+            return self._load_unlocked(task_id)
+
+    def _load_unlocked(self, task_id: str) -> Task:
         """ 加载任务
         
         Args:
@@ -228,6 +277,10 @@ class TaskStore:
         return task
 
     def list(self) -> list[Task]:
+        with self._lock:
+            return self._list_unlocked()
+
+    def _list_unlocked(self) -> "list[Task]":
         """ 列出所有任务
         
         Returns:
@@ -244,7 +297,18 @@ TASKS = TaskStore(TASKS_DIR)
 """ 任务存储实例 """
 
 
-def create_task(subject: str, description: str) -> Task:
+def _resolve_store(store: TaskStore | None) -> TaskStore:
+    """返回显式 TaskStore；未注入时沿用全局 TASKS。"""
+
+    return store if store is not None else TASKS
+
+
+def create_task(
+    subject: str,
+    description: str,
+    *,
+    store: TaskStore | None = None,
+) -> Task:
     """ 创建任务
     
     Args:
@@ -253,20 +317,29 @@ def create_task(subject: str, description: str) -> Task:
     Returns:
         Task: 创建的任务
     """
-    return TASKS.create(subject, description)
+    return _resolve_store(store).create(subject, description)
 
 
-def update_task(task_id: str, addBlockedBy: list[str]) -> Task:
+def update_task(
+    task_id: str,
+    addBlockedBy: list[str],
+    *,
+    store: TaskStore | None = None,
+) -> Task:
     """ 更新任务依赖
     
     Args:
         task_id (str): 任务 ID
         addBlockedBy (list[str]): 新的依赖任务 ID 列表
     """
-    return TASKS.update_dependencies(task_id, addBlockedBy)
+    return _resolve_store(store).update_dependencies(task_id, addBlockedBy)
 
 
-def load_task(task_id: str) -> Task:
+def load_task(
+    task_id: str,
+    *,
+    store: TaskStore | None = None,
+) -> Task:
     """ 加载任务
     
     Args:
@@ -274,19 +347,23 @@ def load_task(task_id: str) -> Task:
     Returns:
         Task: 任务对象
     """
-    return TASKS.load(task_id)
+    return _resolve_store(store).load(task_id)
 
 
-def list_tasks() -> list[Task]:
+def list_tasks(*, store: TaskStore | None = None) -> list[Task]:
     """ 列出所有任务
     
     Returns:
         list[Task]: 所有任务的列表
     """
-    return TASKS.list()
+    return _resolve_store(store).list()
 
 
-def get_task(task_id: str) -> str:
+def get_task(
+    task_id: str,
+    *,
+    store: TaskStore | None = None,
+) -> str:
     """ 获取任务内容
     
     Args:
@@ -294,10 +371,14 @@ def get_task(task_id: str) -> str:
     Returns:
         str: 任务对象的 JSON 字符串
     """
-    return json.dumps(asdict(load_task(task_id)), indent=2)
+    return json.dumps(asdict(load_task(task_id, store=store)), indent=2)
 
 
-def incomplete_dependencies(task: Task) -> list[str]:
+def incomplete_dependencies(
+    task: Task,
+    *,
+    store: TaskStore | None = None,
+) -> list[str]:
     """ 获取任务的未完成依赖任务 ID 列表
     
     Args:
@@ -305,10 +386,11 @@ def incomplete_dependencies(task: Task) -> list[str]:
     Returns:
         list[str]: 未完成依赖任务 ID 列表
     """
+    task_store = _resolve_store(store)
     incomplete = []
     for dependency in task.blockedBy:
         try:
-            if load_task(dependency).status != "completed":
+            if load_task(dependency, store=task_store).status != "completed":
                 incomplete.append(dependency)
         # 加载失败：文件丢了 / 文件解析出错，也当成未完成依赖
         except (ValueError, FileNotFoundError):
@@ -316,7 +398,11 @@ def incomplete_dependencies(task: Task) -> list[str]:
     return incomplete
 
 
-def can_start(task_id: str) -> bool:
+def can_start(
+    task_id: str,
+    *,
+    store: TaskStore | None = None,
+) -> bool:
     """ 判断任务是否可以开始
     
     Args:
@@ -324,10 +410,19 @@ def can_start(task_id: str) -> bool:
     Returns:
         bool: 如果任务可以开始，返回 True；否则返回 False
     """
-    return not incomplete_dependencies(load_task(task_id))
+    task_store = _resolve_store(store)
+    return not incomplete_dependencies(
+        load_task(task_id, store=task_store),
+        store=task_store,
+    )
 
 
-def claim_task(task_id: str, owner: str = "agent") -> str:
+def claim_task(
+    task_id: str,
+    owner: str = "agent",
+    *,
+    store: TaskStore | None = None,
+) -> str:
     """ 领取任务
     
     Args:
@@ -336,20 +431,70 @@ def claim_task(task_id: str, owner: str = "agent") -> str:
     Returns:
         str: 领取任务的确认信息
     """
-    task = load_task(task_id)
-    if task.status != "pending":
-        return f"任务 {task_id} 状态不是 pending，不能被领取"
-    dependencies = incomplete_dependencies(task)
-    if dependencies:
-        return f"任务 {task_id} 有未完成依赖 {dependencies}，不能被领取"
-    task.owner = owner
-    task.status = "in_progress"
-    TASKS.save(task)
-    # print(f"  [claim] {task.subject} -> in_progress (owner: {owner})")
+    try:
+        task = claim_task_strict(task_id, owner, store=_resolve_store(store))
+    except (TaskClaimConflict, TaskDependencyBlocked) as exc:
+        return str(exc)
     return f"Claimed {task.id} ({task.subject})"
 
 
-def complete_task(task_id: str, owner: str = "agent") -> str:
+def claim_task_strict(task_id: str, owner: str, *, store: TaskStore) -> Task:
+    """对一个 TaskStore 原子领取任务；冲突通过类型区分。"""
+    with store._lock:
+        task = load_task(task_id, store=store)
+        if task.status != "pending":
+            raise TaskClaimConflict(f"任务 {task_id} 状态不是 pending，不能被领取")
+        dependencies = incomplete_dependencies(task, store=store)
+        if dependencies:
+            raise TaskDependencyBlocked(
+                f"任务 {task_id} 有未完成依赖 {dependencies}，不能被领取"
+            )
+        task.owner = owner
+        task.status = "in_progress"
+        store.save(task)
+        return task
+
+
+def reassign_failed_task_strict(
+    task_id: str, expected_owner: str, new_owner: str, *, store: TaskStore
+) -> Task:
+    """原子保存失败任务的新 owner 和交接记录；故障分类由 Coordinator 校验。"""
+    with store._lock:
+        task = store.load(task_id)
+        if task.status != "in_progress" or task.owner != expected_owner:
+            raise TaskReassignmentConflict("任务已完成或 owner 已变化，不能改派")
+        if not isinstance(new_owner, str) or not new_owner or new_owner == expected_owner:
+            raise TaskReassignmentConflict("新 owner 必须不同于原 owner")
+        task.owner = new_owner
+        task.reassignments.append({
+            "from_owner": expected_owner,
+            "to_owner": new_owner,
+            "reason": "source_failed",
+        })
+        try:
+            target = store._path(task.id, create_root=True)
+            descriptor, temporary = tempfile.mkstemp(
+                prefix=f".{task.id}.", suffix=".tmp", dir=target.parent
+            )
+        except OSError as exc:
+            raise TaskError(f"任务交接准备失败: {exc}") from exc
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(asdict(task), handle, indent=2, ensure_ascii=False)
+            os.replace(temporary, target)
+        except OSError as exc:
+            raise TaskError(f"任务交接写入失败: {exc}") from exc
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        return task
+
+
+def complete_task(
+    task_id: str,
+    owner: str = "agent",
+    *,
+    store: TaskStore | None = None,
+) -> str:
     """ 完成任务
     
     完成任务后，检查是否有未完成依赖任务的可以开始
@@ -361,34 +506,48 @@ def complete_task(task_id: str, owner: str = "agent") -> str:
     Returns:
         str: 完成任务的确认信息，以及解锁的任务主题列表
     """
-    task = load_task(task_id)
-    if task.status != "in_progress":
-        return f"任务 {task_id} 处于 {task.status} 状态，不能被完成"
-    if task.owner != owner:
-        return f"任务 {task_id} 属于 {task.owner} ，不属于 {owner}"
-
-    # 加载所有任务，检查是否有未完成依赖任务的可以开始
-    ready_before = {
-        candidate.id
-        for candidate in list_tasks()
-        if candidate.status == "pending"
-        and candidate.blockedBy     # 有依赖任务列表
-        and can_start(candidate.id)
-    }
-    task.status = "completed"
-    TASKS.save(task)
-
-    unlocked = [candidate.subject for candidate in list_tasks()
-                if candidate.status == "pending" 
-                and candidate.blockedBy 
-                and candidate.id not in ready_before 
-                and can_start(candidate.id)]
-
-    # print(f"  [complete] {task.subject}")
-    messages = f"Completed {task.id} ({task.subject})"
-    if unlocked:
-        messages += f"\nUnlocked: {', '.join(unlocked)}"
+    try:
+        completion = complete_task_strict(task_id, owner, store=_resolve_store(store))
+    except TaskCompletionConflict as exc:
+        return str(exc)
+    messages = f"Completed {completion.task.id} ({completion.task.subject})"
+    if completion.unlocked_subjects:
+        messages += f"\nUnlocked: {', '.join(completion.unlocked_subjects)}"
     return messages
+
+
+def complete_task_strict(
+    task_id: str, owner: str, *, store: TaskStore
+) -> TaskCompletion:
+    """仅允许当前 owner 完成任务，并返回解锁的任务主题。"""
+    with store._lock:
+        task = load_task(task_id, store=store)
+        if task.status != "in_progress":
+            raise TaskCompletionConflict(
+                f"任务 {task_id} 处于 {task.status} 状态，不能被完成"
+            )
+        if task.owner != owner:
+            raise TaskCompletionConflict(
+                f"任务 {task_id} 属于 {task.owner} ，不属于 {owner}"
+            )
+        ready_before = {
+            candidate.id
+            for candidate in list_tasks(store=store)
+            if candidate.status == "pending"
+            and candidate.blockedBy
+            and can_start(candidate.id, store=store)
+        }
+        task.status = "completed"
+        store.save(task)
+        unlocked = tuple(
+            candidate.subject
+            for candidate in list_tasks(store=store)
+            if candidate.status == "pending"
+            and candidate.blockedBy
+            and candidate.id not in ready_before
+            and can_start(candidate.id, store=store)
+        )
+        return TaskCompletion(task, unlocked)
 
 
 # ------------------------ 外部接口函数 ------------------------

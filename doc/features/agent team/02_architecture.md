@@ -1,0 +1,193 @@
+# 0. Terminology / Glossary
+``` text
+MasterAgent
+    team 中负责协调的主 agent。
+
+TeamAgent
+    lead 创建的 team member。
+
+AgentRuntime
+    执行单个 agent query_loop 的运行环境。
+
+TeamRuntime
+    一支 team 的运行环境与共享服务集合。
+
+TeamCoordinator
+    编排 team-level use cases。
+
+MemberRegistry
+    保存 team member metadata。
+
+MessageBus
+    负责 team message routing。
+
+TaskStore
+    保存共享 task state。
+```
+
+# 1. 架构设计
+
+## 1.1 team 架构设计
+
+``` text
+              Master session composition scope
+   ┌──────────────────────────────────────────────────┐
+   │ shared session_id / workspace                    │
+   │                                                  │
+   │ MasterAgent / AgentRuntime      TeamRuntime      │
+   │              │                    │              │
+   │              │ bound tool handler │              │
+   │              └───────────────────→│              │
+   │                                   ├ TeamCoordinator
+   │                                   ├ MemberRegistry
+   │                                   ├ MessageBus   │
+   │                                   ├ TaskStore    │
+   │                                   └ LifecycleManager
+   └───────────────────────────────────────┬──────────┘
+                                           │ owns
+                              ┌────────────┴────────────┐
+                              ▼                         ▼
+                   TeamAgent wrapper A       TeamAgent wrapper B
+                   AgentRuntime A             AgentRuntime B
+                              │                         │
+                              └────────────┬────────────┘
+                                           ▼
+                                       query_loop()
+
+```
+
+- 一个 Master session 对应一个 TeamRuntime composition context。
+- Master AgentRuntime 与 TeamRuntime 是同一 composition scope 中的 sibling，二者不相互持有或合并状态；Master 的 bound team-tool handler 引用 TeamRuntime。
+- composition scope 生成一个 `session_id` 并显式传给 Master AgentRuntime 与 TeamRuntime。TeamAgent 具有独立 AgentRuntime、state、history、agent_id 与 runtime paths，但与 Master 共享 `session_id` 和当前 workspace。
+
+# 2. 模块边界设计
+
+## 2.1 TeamCoordinator 边界设计
+```
+                 TeamRuntime
+       composition root / team context
+                      │
+      ┌───────────────┼─────────────────┐
+      ▼               ▼                 ▼
+TeamCoordinator MemberRegistry      MessageBus
+      │
+      ├──────────────→ TaskStore
+      │
+      └──────────────→ LifecycleManager
+```
+- TeamRuntime = 一支 team 的运行环境和依赖集合
+- TeamRuntime 是 team composition root，负责组装并持有 team-scoped shared services；这些服务可以由 TeamRuntime 直接持有，也可以通过其组装关系间接持有。
+- TeamRuntime 与 AgentRuntime 相互独立：前者属于 Team，后者属于单个 Agent，不得合并两者的状态或职责。
+- TeamRuntime 在 Master session composition 时即创建；第一次 `spawn_teammate` 只创建 member，不负责延迟创建 TeamRuntime。
+- Master team tool 通过 per-instance bound handler 连接 TeamRuntime；通用 `create_master_runtime()` 只提供工具定义/handler 注入接缝，不感知 TeamRuntime。
+- TeamRuntime 的具体代码落点不是架构约束，由 Phase 1 按现有 package convention 和单一职责选择最小落点。
+- Coordinator = orchestration / use-case 层，负责协调，不负责实现所有东西
+- TaskStore：共享任务存储，用于存储和管理团队任务(create_task、claim_task、update_task、get_task、list_tasks)，底层复用已有 task_system；每个 TeamRuntime 使用独立的 team-scoped TaskStore。
+- Team 路径通过显式 store 注入复用现有 task operation，同时保留当前绑定全局 `TASKS` 的工具路径兼容性；不得复制第二套 task state 或 task behavior。
+- Phase 4 的任务协作由 TeamCoordinator 编排：Master 专属工具创建、查看、分配和显式续跑；领取与完成仍由现有 task_system 修改任务，成员状态仍仅由 MemberRegistry 修改。LifecycleManager 只提供已发布 TeamAgent wrapper 的查询，不承担任务调度。
+- 同步任务执行复用 TeamAgent 的既有 `run(prompt)` 与 query_loop；分配指令直接传入 run，不在 MessageBus 另存一份通知。每个成员同一时刻只允许一轮任务执行，成员之间可分别执行。
+- LifecycleManager：负责“怎么创建/停止 worker”
+- MemberRegistry：负责“现在有哪些 worker”
+- MessageBus：负责各个团队成员之间的消息传递
+
+## 2.2 Agent 边界设计
+一个 Agent 拥有：
+``` text
+Agent
+|
++ Runtime
+|  |
+|  + Memory
+|  |
+|  + Identity
+|
++ MailboxHandle
+```
+- Memory 属于 AgentRuntime。Agent Team 不引入新的记忆模型。
+- Identity 属于 AgentRuntime。由 AgentRuntime 初始化(session_id、agent_name、agent_id)。
+- TeamAgent 是被动 execution wrapper，持有既有 AgentRuntime 并以 `run(prompt)` 进入统一 `query_loop`；spawn 不启动线程，也不立即调用模型。
+- TeamAgent 不直接与用户交互。Phase 2 的工具、memory、event sink 与 max-turn 配置只是可替换机制，不是长期 architecture invariant。
+- Phase 3 为每个已发布 TeamAgent 绑定独立 MailboxHandle，并仅向 TeamAgent policy 注入消息收发工具；调用工具或收发消息本身不启动 `run()` 或改变 MemberState。
+
+
+## 2.3 Mailbox 边界设计
+关于 mailbox 与 MailboxHandle 的关系：
+``` text
+MessageBus
+    owns:
+        MessageBus.route / enqueue / mailbox[agent_id] ownership
+Agent
+    owns:
+        MailboxHandle:
+            MailboxHandle.send()
+            MailboxHandle.receive()
+```
+Agent “拥有 mailbox 能力”，但不拥有 mailbox 数据结构本身。
+
+Phase 3 中，TeamRuntime 的 MessageBus 只查询同一 TeamRuntime 的 MemberRegistry。LifecycleManager 在取得实际 `agent_id` 后创建绑定身份的 MailboxHandle，随被动 TeamAgent wrapper 发布。Bus 按需创建有界 FIFO mailbox；同步收发由 bus 锁保护，不提供磁盘持久化。不存在的目标、不可用的成员、满队列和无效消息均以 typed domain error 显式拒绝。Phase 5 已接受的设计要求：消息状态检查与入队/出队相对 shutdown / fatal transition 使用共同顺序边界；转换之后的收发必须拒绝，已接受消息保留到 TeamRuntime 最终释放。MessageBus 仍只拥有队列，MemberRegistry 仍只拥有成员状态。
+
+## 2.4 LifecycleManager 边界设计
+
+LifecycleManager 什么时候销毁 TeamAgent？
+- A. MasterAgent 显式 shutdown
+- B. Team 完成后统一 teardown
+- C. fatal error
+
+关于 Team 中 Agent 状态及生命周期的管理分工： 
+``` text
+LifecycleManager
+    管 TeamAgent wrapper / AgentRuntime 的逻辑生命周期与可达性
+    是 TeamAgent AgentRuntime 的唯一创建入口
+
+MemberRegistry
+    是 team-visible member metadata / MemberState 的唯一 authoritative owner
+    校验并应用所有 MemberState transition
+    包括当前 MemberState
+        (具体状态及 transition 见 03_runtime.md #1.2)
+
+授权模块
+    通过受控状态转换接口请求或报告 transition
+```
+
+Phase 2 中，LifecycleManager 创建 AgentRuntime 与被动 TeamAgent wrapper，完成 Registry `STARTING → IDLE` 发布事务，并在 commit 前失败时逆序释放逻辑 ownership。RuntimeFactory 已创建的诊断目录不属于当前 cleanup contract。
+
+Phase 5 已接受的生命周期设计：Master 专属入口经 Coordinator 请求 LifecycleManager 停止成员。活动同步 turn、原 owner 的 `in_progress` 任务或已完成但成员收尾转换尚未恢复时，拒绝正常停止并保留可续跑 wrapper；正常 `q/exit` 的 teardown 如遇此类失败也拒绝退出。普通执行异常继续按 Phase 4 显式续跑；只有明确不可恢复的 runtime 故障经 LifecycleManager 报告为 FAILED。Teardown 逐成员 best-effort 处理并汇总失败，失败时保持 TeamRuntime 可恢复；全部安全停止后才最终释放 Registry record 与内存 mailbox，TaskStore session 文件保留。当前 AgentRuntime 没有强制中断或 close contract，不引入后台 worker。
+
+FAILED 成员仍拥有 `in_progress` 任务时，Master 可逐项显式请求恢复。Coordinator 校验旧 owner 与任务后，委托 LifecycleManager 创建全新的 TeamAgent，在 team-scoped TaskStore 内原子记录 owner 交接，再令新成员同步执行一轮；既有 IDLE 成员及其上下文不参与。新成员只使用任务内容和共享工作区，不继承失败成员的消息历史。交接后原 FAILED record 留存到最终释放；若新成员未完成，正常退出继续等待其续跑或再次显式恢复。
+
+## 2.5 MemberRegistry 边界设计
+
+责任:
+- register member
+- query members
+- maintain member metadata
+- owns MemberState
+- 提供受控状态转换入口，校验并应用所有 MemberState transition
+- 在 TeamRuntime 生命周期结束前保留 STOPPED / FAILED member record，使其仍可查询
+- unregister 仅用于 spawn 发布成功前的 rollback，或 TeamRuntime 最终释放
+
+不能负责:
+- spawn AgentRuntime
+- send message
+- assign task
+- call LLM
+
+
+## 2.6 边界设计列表
+| Module | Responsibilities | Must NOT |
+|---|---|---|
+| TeamCoordinator | 编排 use case、协调 shared services；将 spawn 委托给 LifecycleManager | 保存 mailbox、直接构造 runtime、持有 worker、调用 LLM |
+| LifecycleManager | spawn/shutdown/teardown/cleanup；持有 TeamAgent wrapper / AgentRuntime 的逻辑 ownership | 任务调度、消息路由、业务推理 |
+| MemberRegistry | member metadata/state | spawn、message、task、LLM |
+| MessageBus | mailbox ownership、routing | 调用 AgentRuntime、任务调度、Agent lifecycle |
+| TaskStore | task CRUD/state/dependency | 选择“最合适 Agent”、创建 Agent、发消息 |
+
+
+# 3. mini-ATAM / Architecture Evaluation
+| Driver | Tactic | Sensitivity / Trade-off | Risk | Disposition | Evidence |
+|---|---|---|---|---|---|
+| 可维护性 | 分离 Registry/Lifecycle | 组件数增加 | Low | Accept | ARCH tests |
+| 隔离性 | MailboxHandle | MessageBus 成共享关键点 | Medium | Mitigate | contract + F-MSG |
+| 可扩展性 | 统一 AgentRuntime | runtime contract 成敏感点 | Medium | Mitigate | SC/runtime test |
+| 简单性 | 暂无 Scheduler | 无自动调度 | Low | Accept | ADR-003 |
+| 生命周期 | explicit teardown | idle worker 存活 | Low | Accept | ADR-005 |
