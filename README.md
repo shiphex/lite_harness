@@ -35,7 +35,15 @@ uv run main.py `
 
 支持的 API 类型包括：`anthropic`、`openai`、`gemini` 和 `langchain`。
 
-## 2. 运行主线
+## 2. Agent Team
+
+Agent Team 沿用主程序的模型配置，可连接受支持的模型提供方 API，也可连接符合相应协议的本地模型服务。运行前根据所用服务设置 `--api`、`--model_url`、`--model_name` 和鉴权参数 `--api_key`；参数用法见第 1 节。模型地址、名称和鉴权要求以所用服务为准。
+
+Master 可在同一会话创建 TeamAgent、分配团队任务、查询状态，并在安全收尾后退出。TeamAgent 复用现有 query loop；团队成员、消息和任务状态由独立的 TeamRuntime 管理。架构见 [Agent Team](doc/architecture/agent_team.md)。
+
+默认 pytest 不访问模型。单成员 smoke 和双成员/恢复场景须手动运行；服务检查、完整命令、JSON 通过标准以及交互式 Master 操作见 [Agent Team 运行测试笔记](doc/note/s13_agent_team_testing_note.md)。笔记中的模型和本地服务仅是一次验收所用的示例，换用其他模型或提供方 API 时需调整连接与鉴权参数；真实令牌不要写入文档或提交到仓库。
+
+## 3. 运行主线
 
 CLI 负责接收用户输入和显示输出，Runtime 负责组装运行时依赖，query loop 负责模型调用和工具编排：
 
@@ -52,7 +60,7 @@ CLI → RuntimeFactory → query_loop → Model / Hook / Tool → EventSink
 5. `ToolExecutor` 执行工具，EventSink 发布运行事件。
 6. 没有新的工具调用时运行 `Stop` Hook，并返回本轮状态。
 
-## 3. 项目结构
+## 4. 项目结构
 
 ```text
 lite_harness/
@@ -69,15 +77,18 @@ lite_harness/
 ├── event/                       # Event、EventSink 和 Interaction Protocol
 ├── hook/                        # HookManager 和默认 Hook
 ├── tools/                       # 工具注册、执行和上下文压缩
+├── team/                        # TeamRuntime、成员生命周期、通信和任务编排
+├── scripts/                     # 显式运行的本地模型验收入口
 ├── config/                      # 启动参数和运行配置
 ├── doc/architecture/            # 架构说明文档
+├── doc/note/                    # 操作与学习笔记
 ├── tests/                       # 单元测试和流程测试
 ├── main.py                      # 程序启动入口
 ├── pyproject.toml               # 项目和依赖配置
 └── uv.lock                      # 依赖锁定文件
 ```
 
-## 4. 架构文档
+## 5. 架构文档
 
 - [Architecture Principles](doc/architecture/principles.md)：项目架构原则。
 - [Agent](doc/architecture/agent.md)：Agent 顶层入口、输入循环和输出处理。
@@ -87,13 +98,15 @@ lite_harness/
 - [Hook](doc/architecture/hook.md)：HookManager、权限检查和 Hook 生命周期。
 - [Interaction](doc/architecture/interaction.md)：用户输入、审批请求和交互实现。
 - [Model API Contract](doc/architecture/model_api_contract.md)：统一模型请求、响应和适配器协议。
+- [Agent Team](doc/architecture/agent_team.md)：团队组装、消息、任务与生命周期。
+- [Testing](doc/architecture/testing.md)：离线与显式真实模型测试的边界。
 
-## 5. 已知问题
+## 6. 已知问题
 
 1. 用户拒绝执行指令后，Agent 仍可能多次尝试执行相同或相似的命令，然后再次询问用户。
 2. 记忆加载不需要内容或加载失败时，当前流程仍可能等待较长时间。
 
-## 6. 项目参考
+## 7. 项目参考
 
 - [learn-claude-code](https://github.com/shareAI-lab/learn-claude-code)
 - [Claw Code](https://github.com/ultraworkers/claw-code)

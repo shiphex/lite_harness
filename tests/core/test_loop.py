@@ -358,6 +358,79 @@ def test_normal_tool_does_not_emit_compact_events(tmp_path):
     assert event_count(runtime.events.events, EventType.COMPACT_COMPLETED) == 0
     assert event_count(runtime.events.events, EventType.TOOL_REQUESTED) == 1
     assert event_count(runtime.events.events, EventType.TOOL_STARTED) == 1
+
+
+def test_background_disabled_runtime_rejects_start(monkeypatch, tmp_path):
+    runtime = make_runtime(tmp_path, tools_list=[{"name": "bash"}])
+    runtime.policy.allow_background_tools = False
+    monkeypatch.setattr(
+        loop.tools, "start_background_task",
+        lambda block: (_ for _ in ()).throw(AssertionError("background started")),
+    )
+    results, status = loop.execute_tool(
+        ModelResponse(
+            content=[ToolCallPart(
+                id="background-1", name="bash",
+                input={"command": "echo secret", "run_in_background": True},
+            )],
+            stop_reason="tool_use",
+        ),
+        runtime,
+    )
+    assert status == "complete"
+    assert "disabled" in results[0]["content"].lower()
+
+    master = make_runtime(tmp_path / "master", tools_list=[{"name": "bash"}])
+    monkeypatch.setattr(loop.tools, "start_background_task", lambda block: "bg_0001")
+    master_results, _ = loop.execute_tool(
+        ModelResponse(
+            content=[ToolCallPart(
+                id="master-background", name="bash",
+                input={"command": "echo allowed", "run_in_background": True},
+            )],
+            stop_reason="tool_use",
+        ),
+        master,
+    )
+    assert "bg_0001" in master_results[0]["content"]
+
+
+def test_background_disabled_runtime_does_not_drain_global_results(monkeypatch, tmp_path):
+    responses = iter([
+        ModelResponse(
+            content=[ToolCallPart(id="demo-1", name="demo_tool", input={})],
+            stop_reason="tool_use",
+        ),
+        ModelResponse(content=[TextPart("done")], stop_reason="end_turn"),
+    ])
+    runtime = make_runtime(tmp_path, tools_list=[{"name": "demo_tool"}])
+    runtime.policy.allow_background_tools = False
+    patch_loop_dependencies(
+        monkeypatch, runtime,
+        SimpleNamespace(complete=lambda request: next(responses)),
+    )
+    drained = []
+    monkeypatch.setattr(
+        loop.tools, "inject_background_results",
+        lambda messages: drained.append(messages) or 0,
+    )
+    loop.query_loop(runtime)
+    assert drained == []
+
+    master_responses = iter([
+        ModelResponse(
+            content=[ToolCallPart(id="master-1", name="demo_tool", input={})],
+            stop_reason="tool_use",
+        ),
+        ModelResponse(content=[TextPart("done")], stop_reason="end_turn"),
+    ])
+    master = make_runtime(tmp_path / "master", tools_list=[{"name": "demo_tool"}])
+    patch_loop_dependencies(
+        monkeypatch, master,
+        SimpleNamespace(complete=lambda request: next(master_responses)),
+    )
+    loop.query_loop(master)
+    assert len(drained) == 1
     assert event_count(runtime.events.events, EventType.TOOL_COMPLETED) == 1
 
 
