@@ -12,6 +12,7 @@
 2. Optional:
 
    - Optional Real-model E2E Smoke
+   - Extended Real-model Runtime Acceptance
 
 Optional Real-model E2E Smoke 在 Phase 6 完成后执行，不阻塞 MVP。
 
@@ -25,6 +26,7 @@ Optional Real-model E2E Smoke 在 Phase 6 完成后执行，不阻塞 MVP。
 | [√] | Phase 5 | Shutdown / teardown / failures   | 生命周期和 rollback 闭环                      | Shutdown / Teardown / Failure Closure |
 | [√] | Phase 6 | Integration / architecture enforcement | SC、ARCH、Failure tests                | Integration / Architecture Enforcement |
 | [√] | Optional Smoke | Real-model E2E smoke | 显式调用真实模型并核对团队任务闭环 | TASK-08 Optional Real-model E2E Smoke |
+| [√] | Optional Live Acceptance | Extended real-model runtime acceptance | 双成员消息、续跑、FAILED 交接与交互式 Master 体验记录 | TASK-09 Extended Real-model Runtime Acceptance |
 
 
 # Current Facts
@@ -64,8 +66,7 @@ Validated against: CF-01～07 的预检基线为 `4b575b6c437bdbbf3c82467ebf73b5
 
 # Next Gate
 
-TASK-08 的[完成报告](_history/TASK-08_completion.md)、[完成审阅](_history/TASK-08_completion-review.md)和结束提交 `a440cef4c56764093f8ee66b6a279529595e059e` 均已存在；`SMOKE-01`、追踪行与 Optional Smoke Phase 已验收。MVP Phase 0～6 的已接受状态不变；当前没有待执行任务，后续需求按新任务预检。
-
+TASK-09 的[完成审阅](Human_Review.md)已接受并归档，副本见[历史审阅](_history/TASK-09_completion-review.md)。`LIVE-01～03`、追踪行与 Optional Live Acceptance 已按实测证据标记 `[√]`；实现提交为 `dc958281fdd4b664c5de4696607c855cae36cb3d`，架构及运行说明提交为 `1b9b59d26172650599405f75170f5dd265bd25a9`。既有 MVP 与 TASK-08 状态不变；当前没有待执行任务，后续需求按新任务预检。
 
 # Completed Tasks
 
@@ -79,3 +80,4 @@ TASK-08 的[完成报告](_history/TASK-08_completion.md)、[完成审阅](_hist
 | TASK-06 Shutdown / Teardown / Failure Closure | Done / Phase 5 complete | `b17eb85400e98bf2b6cb51387dfd805bafc3a547` | [Completion report](_history/TASK-06_completion.md) / [Accepted review](_history/TASK-06_completion-review.md) |
 | TASK-07 Integration / Architecture Enforcement | Done / Phase 6 complete | `78445829210a113d279b9b1f45197811aa645cd9` | [Completion report](_history/TASK-07_completion.md) / [Accepted review](_history/TASK-07_completion-review.md) |
 | TASK-08 Optional Real-model E2E Smoke | Done / Optional Smoke complete | `a440cef4c56764093f8ee66b6a279529595e059e` | [Completion report](_history/TASK-08_completion.md) / [Accepted review](_history/TASK-08_completion-review.md) |
+| TASK-09 Extended Real-model Runtime Acceptance | Done / Optional Live Acceptance complete | `dc958281fdd4b664c5de4696607c855cae36cb3d` | [Completion report](_history/TASK-09_completion.md) / [Accepted review](_history/TASK-09_completion-review.md) |

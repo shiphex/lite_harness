@@ -35,6 +35,13 @@ E2E smoke:
 - 本地配置为 `api=openai`、`model_url=http://127.0.0.1:8000/v1`、`model_name=unsloth/Qwen3.5-4B-GGUF:UD-Q6_K_XL`、无鉴权占位值 `no-key`；服务变化时重新确认。一次 smoke 只执行一个任务，TeamAgent 最多 3 个 turn，每次最多 512 个输出 token。
 - `SMOKE-01` 默认不进入 pytest/CI；TASK-08 完成审阅已接受且有真实运行证据，现标记 `[√]`。它是 MVP Phase 6 后的可选增量检查，不更改既有成功标准或已勾选阶段。
 
+## 1.4 扩展真实模型验收边界
+
+- TASK-09 的 `LIVE-01～03` 使用独立的显式入口 `python -m scripts.team_real_model_acceptance`，不进入默认 pytest/CI。每个场景使用临时 workspace、真实 TeamRuntime / Master bound 工具和 TeamAgent 统一 query_loop；Master 工具由脚本驱动。
+- 本地配置沿用 §1.3；每名成员每轮最多 6 turn，每次模型请求最多 512 输出 token。只有真实工具执行结果、TaskStore owner / status、MemberRegistry 状态与最终释放全部符合预期才通过；缺少模型回复、错误工具参数、服务/协议错误和 teardown 失败均不得计为通过。
+- `LIVE-02/03` 首轮只暴露 `get_team_task` 并限制为 1 turn，以受控方式形成未完成任务；`LIVE-03` 的 fatal 是显式注入的验收故障，不代表真实模型或服务自行故障。交互式 Master 在临时目录中单独观察，不作为脚本化功能验收门槛。
+- TASK-09 已实测且完成审阅获接受，`LIVE-01～03` 与追踪行标记 `[√]`；交互式 Master 体验结果继续单列，不改变现有 `SMOKE-01`、Phase 6 或 SC 的已接受状态。审阅证据见 [TASK-09 完成审阅](_history/TASK-09_completion-review.md)。
+
 # 2. State Machine Tests
 - [√] STATE-01 STARTING → IDLE allowed
 - [√] STATE-02 IDLE → BUSY allowed
@@ -134,6 +141,14 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 
 - [√] SMOKE-01 显式运行本地真实模型 smoke：Master bound 工具创建一名 TeamAgent 和一项任务，TeamAgent 经统一 query_loop 触发 `complete_team_task`；核对至少一次真实模型响应、实际 owner、任务 `completed`、成员 IDLE 与 teardown 最终释放。服务、协议、工具调用或释放失败须记录真实结果，不把跳过计为通过。验收证据见 TASK-08 [完成报告](_history/TASK-08_completion.md)与[已接受审阅](_history/TASK-08_completion-review.md)。
 
+# 4.6 可选扩展真实模型运行验收
+
+- [√] LIVE-01 Master bound 工具创建两名独立 TeamAgent 与各自任务；真实模型驱动发送、接收和两次完成工具；发送内容、接收的 sender / target / content、owner、任务完成、成员 IDLE 与最终释放全部正确。
+- [√] LIVE-02 受控首轮未完成后任务为 `in_progress`、原 owner 为 BUSY；停止与首次 teardown 拒绝、其他成员不能续跑；原 owner 恢复工具后由真实模型完成任务，最终释放。
+- [√] LIVE-03 受控未完成任务的 owner 被显式报告 fatal 后，首次 teardown 部分失败；恢复入口创建全新成员，由真实模型完成原任务；校验交接记录、旧 FAILED record、新 owner / IDLE 与最终释放。
+
+交互式 Master 体验检查：在临时目录中以相同本地模型启动 `main.py`，观察模型自行选择 spawn / create / assign / get 工具及 `q` 退出。单独记录实际结果，不替代或阻塞 `LIVE-01～03`。
+
 
 
 # 5. Traceability Matrix
@@ -147,4 +162,5 @@ Team task 集成必须复用现有 task_system 的 TaskStore / task behavior，�
 | [√] | SC-06 happy path 与主要 failure path 的 Phase 6 增量验收 | architecture 2.1～2.6 | contract 2.1～3.3 | F-SPAWN-01/02、F-MSG-01～04、F-STATE-01、F-TASK-01～05、F-STOP-01～05 | ADR-007/011/012/013/014/015 | 既有 Failure/State/STOP 检查、INTEG-01/02 | TASK-07 |
 | [√] | SC-07 Non-goal 的 Phase 6 增量验收 | architecture 2.1/2.2/2.6 | contract 2.2/2.6 | — | ADR-003/005/006/012 | ARCH-07/08、COLLAB-02、MSG-03 | TASK-07 |
 | [√] | SC-02/04/06 的可选真实模型增量验证；不改变已接受的 MVP 状态 | architecture 1.1/2.2/2.4/2.5 | contract 2.4/2.6/3.1/3.3 | F-TASK-03/04、F-STOP-02/03 | ADR-007/008/010/012/013/014 | SMOKE-01 | TASK-08 |
+| [√] | SC-01～06 的可选扩展真实模型增量验证；不改变已接受的 MVP 状态 | architecture 2.1～2.6 | contract 2.1～3.3 | F-TASK-03、F-STOP-02/03/05 | ADR-004/007/012/013/014/015 | LIVE-01～03 | TASK-09 |
 

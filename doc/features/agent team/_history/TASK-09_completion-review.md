@@ -4,23 +4,23 @@ Status: Accepted Review
 
 Task: TASK-09 Extended Real-model Runtime Acceptance
 
-Based on: [_history/TASK-09_completion.md](_history/TASK-09_completion.md)
+Based on: [TASK-09_completion.md](TASK-09_completion.md)
 
 Result: 用户要求归档 TASK-09 完成审阅；接受显式多场景真实模型验收入口、离线防误判测试和本地运行结果。
 
 Reviewer: User（2026-10-01 明确要求“归档”当前待审任务）
 
-Design authority: [_history/TASK-09_human-review.md](_history/TASK-09_human-review.md)；用户明确要求实现已确定的测试方案
+Design authority: [TASK-09_human-review.md](TASK-09_human-review.md)；用户明确要求实现已确定的测试方案
 
-Superseded by: [07 测试计划](07_test_plan.md) LIVE-01～03 与[已完成任务](08_tasks.md) TASK-09；归档副本见 [_history/TASK-09_completion-review.md](_history/TASK-09_completion-review.md)
+Superseded by: [07 测试计划](../07_test_plan.md) LIVE-01～03 与[当前任务](../08_tasks.md) TASK-09；本文件是完成审阅归档副本
 
 Prepared by: Codex
 
-Baseline: `ccee916` (`feature/team`)；实现提交 `dc958281fdd4b664c5de4696607c855cae36cb3d`，架构与使用文档提交 `1b9b59d26172650599405f75170f5dd265bd25a9`
+Baseline: `ccee916` (`feature/team`)；当前实现和文档尚未提交
 
 ## 审阅依据
 
-- [完成报告](_history/TASK-09_completion.md)列明实际改动、离线与真实模型命令、结果和边界。
+- [完成报告](TASK-09_completion.md)列明实际改动、离线与真实模型命令、结果和边界。
 - 全量 pytest 为 374 passed；现有单成员 smoke Exit 0。新增离线测试覆盖纯文字回复、错误任务工具调用、teardown 失败不得误判通过，以及场景异常后的释放尝试。
 - 新入口最终运行 Exit 0：LIVE-01～03 均 passed，三项全部最终释放；初次 LIVE-01 因模型发送错误内容 Exit 1，调整明确的消息参数后重跑通过。
 - 交互式 Master 在临时目录自行调用 spawn / create / assign / get 工具，工具结果显示任务 completed、成员 idle；输入 q 后 Exit 0。该项单列体验结果，不参与脚本化功能门槛。
@@ -34,4 +34,4 @@ Baseline: `ccee916` (`feature/team`)；实现提交 `dc958281fdd4b664c5de4696607
 
 ## 审阅后交接
 
-完成审阅已接受；`07_test_plan.md` 的 LIVE-01～03、追踪行与 `08_tasks.md` 的 Optional Live Acceptance 已按证据标记 `[√]`。TASK-09 已以实现提交 `dc958281fdd4b664c5de4696607c855cae36cb3d` 结束并移入 Completed Tasks。TASK-08 已接受的完成审阅保留在 [_history/TASK-08_completion-review.md](_history/TASK-08_completion-review.md)。
+完成审阅已接受；`07_test_plan.md` 的 LIVE-01～03、追踪行与 `08_tasks.md` 的 Optional Live Acceptance 已按证据标记 `[√]`。TASK-09 的结束提交尚未授权或执行，任务简报保留至该门槛完成。TASK-08 已接受的完成审阅保留在 [TASK-08_completion-review.md](TASK-08_completion-review.md)。
