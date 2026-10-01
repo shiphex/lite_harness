@@ -137,7 +137,7 @@ runtime = RuntimeFactory.create(
 
 # 8. 一次运行的关系
 
-CLI 顶层入口负责创建 Runtime 和接收用户输入；`query_loop()` 负责模型调用与工具编排；具体组件负责各自的副作用或观察行为。
+CLI 顶层入口负责创建 Runtime 和接收用户输入；`query_loop()` 负责模型调用与工具编排；具体组件负责各自的副作用或观察行为。Master 会话同时创建独立的 TeamRuntime，见 §10。
 
 ```mermaid
 sequenceDiagram
@@ -172,3 +172,9 @@ sequenceDiagram
 - Hook 决定工具调用是否继续、是否需要审批；真正的审批由 Interaction 完成。
 - EventSink 只发布已经发生的事实，不替代 Interaction，也不控制 query loop。
 - 所有实际工具执行都经过 Runtime 中的 `ToolExecutor`。
+
+# 10. AgentRuntime 与 TeamRuntime
+
+`AgentRuntime` 保存**一名 Agent** 的策略、状态和组件。`TeamRuntime` 是同一 Master session 的 sibling composition root，持有成员 Registry、MessageBus、独立 TaskStore、LifecycleManager 和 Coordinator。两者共享 `session_id`，但不共享状态所有权；每名 TeamAgent 又有各自独立的 `AgentRuntime`，并复用同一个 `query_loop()`。
+
+Master 专属团队工具通过 `create_master_runtime()` 的 per-instance 扩展参数绑定。TeamAgent 的 runtime 由 LifecycleManager 经 `RuntimeFactory` 创建，成员收发消息只经过自身 MailboxHandle。详细关系与任务/生命周期路径见 [Agent Team 架构](agent_team.md)。
