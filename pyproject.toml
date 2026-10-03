@@ -1,7 +1,7 @@
 [project]
 name = "lite-harness"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.9.0"
+description = "A small, structured agent harness for studying and validating tool-using LLM agent architectures."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
